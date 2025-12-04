@@ -2,7 +2,8 @@
 import type { Task, TaskStatus } from '../types'
 import TaskCard from './TaskCard.vue'
 import { useTasksStore } from '../stores/tasks'
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { useColumnsStore } from '../stores/columns'
 
 const props = defineProps<{
   title: string
@@ -13,10 +14,11 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'edit', task: Task): void
   (e: 'remove', id: number): void
-  (e: 'edit-column', title: string): void
+  (e: 'card-color', title: string): void
 }>()
 
 const tasksStore = useTasksStore()
+const columnsStore = useColumnsStore()
 
 const menuOpen = ref(false)
 const headerRef = ref<HTMLElement | null>(null)
@@ -25,6 +27,20 @@ const newTitle = ref('')
 const newDescription = ref('')
 const creating = ref(false)
 const addErr = ref('')
+
+const columnColor = computed(() => columnsStore.getColor(props.status).value || '')
+
+const palette = ['#ffffff', '#fef3c7', '#fee2e2', '#ecfccb', '#e0f2fe', '#ede9fe', '#f3f4f6']
+
+function pickColor(color: string) {
+  columnsStore.setColor(props.status, color)
+  closeMenu()
+}
+
+function resetColor() {
+  columnsStore.setColor(props.status, null)
+  closeMenu()
+}
 
 function toggleMenu() {
   menuOpen.value = !menuOpen.value
@@ -72,7 +88,7 @@ async function createTask() {
 
 function onDragOver(e: DragEvent) {
   e.preventDefault()
-  e.dataTransfer && (e.dataTransfer.dropEffect = 'move')
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
 }
 
 async function onDrop(e: DragEvent) {
@@ -86,9 +102,15 @@ async function onDrop(e: DragEvent) {
 </script>
 
 <template>
-  <section class="column" @dragover="onDragOver" @drop="onDrop">
+  <section
+    class="column"
+    @dragover="onDragOver"
+    @drop="onDrop"
+    :style="columnColor ? { background: columnColor } : {}"
+  >
     <header class="column-header" ref="headerRef">
       <h3>{{ title }}</h3>
+
       <div style="display: flex; align-items: center; justify-content: center">
         <div class="col-menu">
           <button
@@ -99,14 +121,34 @@ async function onDrop(e: DragEvent) {
           >
             …
           </button>
+
           <div v-if="menuOpen" class="menu-popover">
-            <button class="menu-item" @click="() => (closeMenu(), emit('edit-column', title))">
-              Edit
-            </button>
+            <div class="color-palette">
+              <template v-for="c in palette" :key="c">
+                <button
+                  class="swatch"
+                  :style="{
+                    background: c,
+                    border:
+                      columnColor === c
+                        ? '2px solid rgba(0,0,0,0.12)'
+                        : '1px solid rgba(0,0,0,0.06)',
+                  }"
+                  @click="pickColor(c)"
+                  :title="c"
+                />
+              </template>
+            </div>
+
+            <div style="display: flex; gap: 8px; margin-top: 8px">
+              <button class="menu-item" @click="resetColor">Reset</button>
+              <button class="menu-item" @click="closeMenu">Close</button>
+            </div>
           </div>
         </div>
       </div>
     </header>
+
     <div class="list">
       <TaskCard
         v-for="t in tasks"
@@ -115,17 +157,25 @@ async function onDrop(e: DragEvent) {
         @edit="emit('edit', $event)"
         @remove="emit('remove', $event)"
       />
+
       <div class="add-area">
         <div v-if="addOpen" class="add-form">
-          <input v-model="newTitle" placeholder="Task title" />
-          <input v-model="newDescription" placeholder="Description (optional)" />
-          <div class="add-actions">
-            <button @click="createTask" :disabled="creating">Add</button>
-            <button @click="() => (addOpen = false)">Cancel</button>
+          <div class="add-inner">
+            <input v-model="newTitle" placeholder="Task title" />
+            <input v-model="newDescription" placeholder="Description (optional)" />
+
+            <div class="add-actions">
+              <button @click="createTask" :disabled="creating">Add</button>
+              <button @click="addOpen = false">Cancel</button>
+            </div>
+
+            <p v-if="addErr" class="error">{{ addErr }}</p>
           </div>
-          <p v-if="addErr" class="error">{{ addErr }}</p>
         </div>
-        <button v-else class="add-new" @click="toggleAdd">+ Add new task</button>
+
+        <div class="add-inner">
+          <button v-if="!addOpen" class="add-new" @click="toggleAdd">+ Add new task</button>
+        </div>
       </div>
     </div>
   </section>
@@ -140,9 +190,9 @@ async function onDrop(e: DragEvent) {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  box-sizing: border-box;
   min-width: 220px;
   width: 100%;
+  box-sizing: border-box;
 }
 .column-header {
   display: flex;
@@ -157,19 +207,17 @@ async function onDrop(e: DragEvent) {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  flex: 1 1 auto;
-  min-height: 0; /* allow proper scrolling inside flex */
+  flex: 1;
+  min-height: 0;
   overflow: auto;
 }
 
 .add-area {
-  margin-top: 6px;
   width: 100%;
-  box-sizing: border-box;
-  margin-bottom: 4px;
-  /* stay at the bottom of the column when there's extra space */
   margin-top: auto;
+  margin-bottom: 4px;
 }
+
 .add-new {
   width: 100%;
   padding: 6px 8px;
@@ -179,6 +227,7 @@ async function onDrop(e: DragEvent) {
   cursor: pointer;
   font-size: 13px;
 }
+
 .add-form input {
   width: 100%;
   padding: 6px 8px;
@@ -187,18 +236,8 @@ async function onDrop(e: DragEvent) {
   border-radius: 6px;
   font-size: 13px;
   height: 34px;
-  line-height: 1.2;
 }
 
-/* ensure inputs/buttons don't exceed card/column width */
-.add-area,
-.add-form,
-.add-new,
-.add-form input,
-.add-actions button {
-  box-sizing: border-box;
-  max-width: 100%;
-}
 .add-actions {
   display: flex;
   gap: 8px;
@@ -210,7 +249,6 @@ async function onDrop(e: DragEvent) {
   padding: 5px 8px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
 }
 .add-actions button:last-child {
   background: transparent;
@@ -218,11 +256,23 @@ async function onDrop(e: DragEvent) {
   padding: 5px 8px;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 13px;
 }
 .error {
   color: #b91c1c;
   margin-top: 6px;
+}
+
+.add-inner {
+  box-sizing: border-box;
+  padding: 12px;
+  width: 100%;
+}
+.add-inner .add-new {
+  width: 100%;
+}
+.add-inner input {
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .col-menu {
@@ -233,7 +283,6 @@ async function onDrop(e: DragEvent) {
   border: none;
   cursor: pointer;
   font-size: 18px;
-  line-height: 1;
 }
 .menu-popover {
   position: absolute;
@@ -242,7 +291,6 @@ async function onDrop(e: DragEvent) {
   background: white;
   border: 1px solid #e5e7eb;
   border-radius: 6px;
-  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.06);
   padding: 6px;
   z-index: 20;
   display: flex;
@@ -252,7 +300,16 @@ async function onDrop(e: DragEvent) {
   background: transparent;
   border: none;
   padding: 6px 10px;
-  text-align: left;
+  cursor: pointer;
+}
+.color-palette {
+  display: flex;
+  gap: 6px;
+}
+.swatch {
+  width: 28px;
+  height: 20px;
+  border-radius: 4px;
   cursor: pointer;
 }
 </style>

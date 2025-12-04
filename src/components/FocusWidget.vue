@@ -72,8 +72,10 @@ async function stop(success: boolean) {
     <template v-else>
       <div class="row running">
         <span class="timer">{{ elapsedText }}</span>
-        <button class="success" :disabled="stopping" @click="stop(true)">Complete</button>
-        <button class="fail" :disabled="stopping" @click="stop(false)">Stop</button>
+        <div class="buttons">
+          <button class="success" :disabled="stopping" @click="stop(true)">Complete</button>
+          <button class="fail" :disabled="stopping" @click="stop(false)">Stop</button>
+        </div>
       </div>
     </template>
   </div>
@@ -125,5 +127,15 @@ async function stop(success: boolean) {
   padding: 6px 10px;
   border-radius: 6px;
   cursor: pointer;
+}
+.row.running {
+  justify-content: space-between;
+  padding: 10px;
+}
+.buttons {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>
