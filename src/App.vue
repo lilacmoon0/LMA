@@ -3,13 +3,20 @@
 <template>
   <div class="app">
     <nav class="nav">
-      <router-link class="brand" to="/">LMA</router-link>
-      <router-link to="/">Dashboard</router-link>
-      <router-link to="/focus-log">Focus Log</router-link>
-      <router-link to="/day-summary">Day Summary</router-link>
+      <RouterLink class="brand" to="/">LMA</RouterLink>
+
+      <RouterLink class="nav-link" to="/">Dashboard</RouterLink>
+      <RouterLink class="nav-link" to="/focus-log">Focus Log</RouterLink>
+      <RouterLink class="nav-link" to="/day-summary">Day Summary</RouterLink>
     </nav>
+
     <main class="main">
-      <router-view />
+      <Suspense>
+        <RouterView />
+        <template #fallback>
+          <div>Loading…</div>
+        </template>
+      </Suspense>
     </main>
   </div>
 </template>
@@ -30,8 +37,16 @@
   font-weight: 700;
   margin-right: 8px;
 }
+.nav-link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
 .main {
-  max-width: 1100px;
+  max-width: 1500px;
   margin: 0 auto;
 }
 </style>

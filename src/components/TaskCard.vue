@@ -102,9 +102,46 @@ const progressStyle = computed(() => ({
   font-size: 12px;
 }
 </style>
+<style scoped>
+.card {
+  width: 100%;
+  box-sizing: border-box;
+  transition:
+    box-shadow 0.12s ease,
+    transform 0.08s ease;
+}
+.card:hover {
+  box-shadow: 0 6px 18px rgba(16, 24, 40, 0.08);
+  transform: translateY(-2px);
+}
+.desc {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.card-header .title a {
+  color: inherit;
+  text-decoration: none;
+}
+.card-header .title a:hover {
+  text-decoration: underline;
+}
+.progress {
+  height: 8px;
+}
+.meta {
+  align-items: center;
+}
+</style>
 <style>
-.card { cursor: grab; }
-.card:active { cursor: grabbing; }
+.card {
+  cursor: grab;
+}
+.card:active {
+  cursor: grabbing;
+}
 </style>
 
 <script lang="ts">

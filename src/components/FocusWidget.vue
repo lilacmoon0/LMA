@@ -66,14 +66,14 @@ async function stop(success: boolean) {
     <template v-if="!active">
       <div class="row">
         <input v-model="notes" class="notes" placeholder="Focus notes (optional)" />
-        <button class="start" :disabled="starting" @click="start">🌱 Start Focus</button>
+        <button class="start" :disabled="starting" @click="start">Focus</button>
       </div>
     </template>
     <template v-else>
       <div class="row running">
-        <span class="timer">🌳 {{ elapsedText }}</span>
-        <button class="success" :disabled="stopping" @click="stop(true)">✔️ Complete</button>
-        <button class="fail" :disabled="stopping" @click="stop(false)">⏹️ Stop</button>
+        <span class="timer">{{ elapsedText }}</span>
+        <button class="success" :disabled="stopping" @click="stop(true)">Complete</button>
+        <button class="fail" :disabled="stopping" @click="stop(false)">Stop</button>
       </div>
     </template>
   </div>
@@ -108,6 +108,7 @@ async function stop(success: boolean) {
 .running .timer {
   font-weight: 600;
   color: #065f46;
+  width: max-content;
 }
 .success {
   background: #059669;

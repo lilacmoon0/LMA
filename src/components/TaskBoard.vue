@@ -20,7 +20,7 @@ onMounted(() => {
       @remove="tasksStore.remove($event)"
     />
     <TaskColumn
-      title="General Doing"
+      title="Doing"
       status="doing"
       :tasks="tasksStore.byStatus('doing').value"
       @edit="$emit('edit', $event)"
@@ -46,17 +46,11 @@ onMounted(() => {
 <style scoped>
 .board {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
-}
-@media (max-width: 1200px) {
-  .board {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-@media (max-width: 700px) {
-  .board {
-    grid-template-columns: 1fr;
-  }
+  width: 100%;
+  padding: 0 12px;
+  box-sizing: border-box;
 }
 </style>
+*** End Patch
