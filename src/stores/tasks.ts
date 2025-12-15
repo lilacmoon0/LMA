@@ -46,10 +46,6 @@ export const useTasksStore = defineStore('tasks', () => {
     return update(id, { status })
   }
 
-  async function setProgress(id: number, progress: number) {
-    return update(id, { progress })
-  }
-
   return {
     items,
     loading,
@@ -60,6 +56,5 @@ export const useTasksStore = defineStore('tasks', () => {
     update,
     remove,
     moveTo,
-    setProgress,
   }
 })

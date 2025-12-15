@@ -37,3 +37,12 @@ export interface Paginated<T> {
   previous: string | null
   results: T[]
 }
+
+export interface Block {
+  id: number
+  task: number // task id (required)
+  title: string
+  desc: string
+  start_date: string // ISO datetime
+  end_date: string // ISO datetime
+}

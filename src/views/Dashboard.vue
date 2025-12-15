@@ -17,6 +17,7 @@ onMounted(() => {
       <h2>Life Management Dashboard</h2>
     </header>
     <TaskBoard />
+    
     <DaySummary />
   </div>
 </template>

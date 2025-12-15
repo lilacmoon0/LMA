@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { storeToRefs } from 'pinia'
 import type { Task } from '../types'
 import { useFocusStore } from '../stores/focusSessions'
-import FocusWidget from './FocusWidget.vue'
 import { useTasksStore } from '../stores/tasks'
 
 // Define Props Interface for cleaner syntax and environment compatibility
@@ -26,13 +26,12 @@ const emit = defineEmits<{
 }>()
 
 const focusStore = useFocusStore()
+const { activeByTask } = storeToRefs(focusStore)
 const tasksStore = useTasksStore()
 
-const effectiveThemeColor = computed(() => (props.task as any).theme_color || props.theme_color)
-const effectiveBgColor = computed(
-  () => (props.task as any).background_color || props.background_color,
-)
-const effectiveTextColor = computed(() => (props.task as any).color || props.color)
+const effectiveThemeColor = computed(() => props.task.theme_color || props.theme_color)
+const effectiveBgColor = computed(() => props.task.background_color || props.background_color)
+const effectiveTextColor = computed(() => props.task.color || props.color)
 
 // CSS Variables based on Resolved Colors
 const rootStyles = computed(() => ({
@@ -59,7 +58,6 @@ const progressStyle = computed(() => ({
 const editing = ref(false)
 const editTitle = ref('')
 const editDescription = ref('')
-const editProgress = ref<number>(0)
 const editEstimated = ref<number>(0)
 
 // New Color State Refs
@@ -71,6 +69,90 @@ const saving = ref(false)
 const editError = ref('')
 const titleRef = ref<HTMLInputElement | null>(null)
 
+// Minimal focus controls state (inline)
+const elapsedSec = ref(0)
+const ticker = ref<number | null>(null)
+const paused = ref(false)
+const activeSession = computed(() => activeByTask.value[props.task.id] || null)
+
+function tickElapsed() {
+  if (!paused.value) {
+    elapsedSec.value += 1
+  }
+}
+
+const elapsedText = computed(() => {
+  const m = Math.floor(elapsedSec.value / 60)
+  const s = elapsedSec.value % 60
+  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+})
+
+watch(
+  () => activeSession.value?.id,
+  () => {
+    if (activeSession.value) {
+      // start local timer
+      paused.value = false
+      elapsedSec.value = 0
+      if (ticker.value) window.clearInterval(ticker.value)
+      ticker.value = window.setInterval(tickElapsed, 1000)
+    } else {
+      // clear when session ends
+      paused.value = false
+      if (ticker.value) {
+        window.clearInterval(ticker.value)
+        ticker.value = null
+      }
+      elapsedSec.value = 0
+    }
+  },
+  { immediate: true },
+)
+
+onBeforeUnmount(() => {
+  if (ticker.value) window.clearInterval(ticker.value)
+})
+
+async function startFocusQuick() {
+  await focusStore.start(props.task.id, '')
+}
+
+function stopFocusQuick() {
+  if (!activeSession.value) return
+  // Pause locally without ending the session
+  paused.value = true
+  if (ticker.value) {
+    window.clearInterval(ticker.value)
+    ticker.value = null
+  }
+}
+
+async function endFocusQuick() {
+  if (!activeSession.value) return
+  await focusStore.stop(activeSession.value.id, true)
+  paused.value = false
+  if (ticker.value) {
+    window.clearInterval(ticker.value)
+    ticker.value = null
+  }
+}
+
+function onFocusButtonClick() {
+  if (!activeSession.value) {
+    startFocusQuick()
+  } else {
+    if (paused.value) {
+      // resume
+      paused.value = false
+      if (ticker.value) window.clearInterval(ticker.value)
+      ticker.value = window.setInterval(tickElapsed, 1000)
+    } else {
+      // pause
+      stopFocusQuick()
+    }
+  }
+}
+
 // Watch for task changes to initialize edit form
 watch(
   () => props.task,
@@ -78,16 +160,95 @@ watch(
     if (!t) return
     editTitle.value = t.title || ''
     editDescription.value = t.description || ''
-    editProgress.value = t.progress ?? 0
     editEstimated.value = t.estimated_minutes ?? 0
 
     // Initialize colors from the Task object first, fallback to props/defaults
-    editThemeColor.value = (t as any).theme_color || props.theme_color
-    editBackgroundColor.value = (t as any).background_color || props.background_color
-    editTextColor.value = (t as any).color || props.color
+    editThemeColor.value = t.theme_color || props.theme_color
+    editBackgroundColor.value = t.background_color || props.background_color
+    editTextColor.value = t.color || props.color
   },
   { immediate: true, deep: true },
 )
+
+// Palettes and presets (for color selection)
+// Unified palette used for theme, background, and text
+const commonPalette = ['#111827', '#374151', '#6b7280', '#000000', '#ffffff', '#fef3c7', '#fee2e2', '#ecfccb', '#e0f2fe', '#ede9fe', '#f3f4f6', '#10b981', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6']
+
+// Palette menu (single teleported dropdown) with auto positioning
+type PaletteKind = 'theme' | 'bg' | 'text'
+const openPalette = ref<PaletteKind | null>(null)
+const menuPos = ref<{ top: number; left: number } | null>(null)
+
+const MENU_W = 360
+const MENU_H = 224
+
+function computeMenuPosition(anchorEl: HTMLElement) {
+  const rect = anchorEl.getBoundingClientRect()
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  let top = rect.bottom + 6
+  let left = rect.left
+  if (top + MENU_H > vh - 8 && rect.top - 6 - MENU_H >= 8) {
+    top = rect.top - 6 - MENU_H
+  }
+  if (left + MENU_W > vw - 8) {
+    left = Math.max(8, vw - MENU_W - 8)
+  }
+  if (left < 8) left = 8
+  if (top < 8) top = 8
+  return { top, left }
+}
+
+function openPaletteMenu(kind: PaletteKind, e: MouseEvent) {
+  e.stopPropagation()
+  const current = openPalette.value
+  if (current === kind) {
+    openPalette.value = null
+    return
+  }
+  const target = e.currentTarget as HTMLElement
+  menuPos.value = computeMenuPosition(target)
+  openPalette.value = kind
+}
+
+function pickColor(c: string) {
+  if (!openPalette.value) return
+  if (openPalette.value === 'theme') editThemeColor.value = c
+  else if (openPalette.value === 'bg') editBackgroundColor.value = c
+  else editTextColor.value = c
+  openPalette.value = null
+}
+
+function isSelected(c: string) {
+  if (openPalette.value === 'theme') return editThemeColor.value === c
+  if (openPalette.value === 'bg') return editBackgroundColor.value === c
+  if (openPalette.value === 'text') return editTextColor.value === c
+  return false
+}
+
+function closePalettes() {
+  openPalette.value = null
+}
+
+function onDocClick() {
+  closePalettes()
+}
+
+function onWindowChange() {
+  // Close on resize/scroll to avoid misaligned menus
+  closePalettes()
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocClick)
+  window.addEventListener('resize', onWindowChange)
+  window.addEventListener('scroll', onWindowChange, true)
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocClick)
+  window.removeEventListener('resize', onWindowChange)
+  window.removeEventListener('scroll', onWindowChange, true)
+})
 
 function openEdit() {
   editError.value = ''
@@ -107,7 +268,6 @@ async function saveEdit() {
     const updated = await tasksStore.update(props.task.id, {
       title: editTitle.value.trim(),
       description: editDescription.value.trim(),
-      progress: Number(editProgress.value) || 0,
       estimated_minutes: Number(editEstimated.value) || 0,
       // Save color preferences
       theme_color: editThemeColor.value,
@@ -116,8 +276,8 @@ async function saveEdit() {
     })
     emit('edit', updated)
     editing.value = false
-  } catch (e: any) {
-    editError.value = e?.message ?? String(e)
+  } catch (err: unknown) {
+    editError.value = err instanceof Error ? err.message : String(err)
   } finally {
     saving.value = false
   }
@@ -137,6 +297,20 @@ function onDragStart(e: DragEvent) {
         <router-link :to="`/tasks/${task.id}`">{{ task.title }}</router-link>
       </h4>
       <div class="actions">
+        <!-- Show timer and End only during an active focus -->
+        <template v-if="activeSession">
+          <div class="focus-min">
+            <span class="focus-time">{{ elapsedText }}</span>
+            <button class="focus-toggle" :title="paused ? 'Resume' : 'Stop'" @click="onFocusButtonClick">
+              {{ paused ? '▶' : '⏹' }}
+            </button>
+            <button class="focus-end" title="End" @click="endFocusQuick">✓</button>
+          </div>
+        </template>
+        <template v-else>
+          <button class="focus-toggle" title="Focus" @click="onFocusButtonClick">⏱</button>
+        </template>
+
         <button class="icon" title="Edit" @click="openEdit">✏️</button>
         <button class="icon" title="Delete" @click="emit('remove', task.id)">X</button>
       </div>
@@ -151,9 +325,6 @@ function onDragStart(e: DragEvent) {
       <span>Est: {{ task.estimated_minutes }}m</span>
       <span>Focused: {{ focusedMinutes }}m</span>
     </div>
-
-    <FocusWidget :task-id="task.id" />
-
     <div v-if="editing" class="edit-panel">
       <div class="edit-panel-inner">
         <!-- Title -->
@@ -175,55 +346,56 @@ function onDragStart(e: DragEvent) {
         <!-- Numbers -->
         <div class="edit-row fields-row">
           <div class="edit-col small">
-            <label class="lbl">Progress %</label>
-            <input
-              type="number"
-              v-model.number="editProgress"
-              min="0"
-              max="100"
-              class="small-input"
-            />
-          </div>
-          <div class="edit-col small">
             <label class="lbl">Est. minutes</label>
             <input type="number" v-model.number="editEstimated" min="0" class="small-input" />
           </div>
         </div>
 
-        <!-- New Color Selection Row -->
+        <!-- Per-field color palettes (open on click instead of color picker) -->
         <div class="edit-row fields-row">
           <div class="edit-col small">
             <label class="lbl">Theme</label>
-            <div class="color-wrapper">
-              <input
-                type="color"
-                v-model="editThemeColor"
-                class="color-input"
-                title="Progress bar & button color"
-              />
+            <button class="color-wrapper" @click.stop="openPaletteMenu('theme', $event)">
+              <span class="swatch" :style="{ background: editThemeColor }"></span>
               <span class="color-val">{{ editThemeColor }}</span>
-            </div>
+            </button>
           </div>
           <div class="edit-col small">
             <label class="lbl">Background</label>
-            <div class="color-wrapper">
-              <input
-                type="color"
-                v-model="editBackgroundColor"
-                class="color-input"
-                title="Card background color"
-              />
+            <button class="color-wrapper" @click.stop="openPaletteMenu('bg', $event)">
+              <span class="swatch" :style="{ background: editBackgroundColor }"></span>
               <span class="color-val">{{ editBackgroundColor }}</span>
-            </div>
+            </button>
           </div>
           <div class="edit-col small">
             <label class="lbl">Text</label>
-            <div class="color-wrapper">
-              <input type="color" v-model="editTextColor" class="color-input" title="Text color" />
+            <button class="color-wrapper" @click.stop="openPaletteMenu('text', $event)">
+              <span class="swatch" :style="{ background: editTextColor }"></span>
               <span class="color-val">{{ editTextColor }}</span>
-            </div>
+            </button>
           </div>
         </div>
+
+        <!-- Teleported palette menu -->
+        <teleport to="body">
+          <div
+            v-if="openPalette && menuPos"
+            class="palette-menu"
+            :style="{ top: menuPos.top + 'px', left: menuPos.left + 'px' }"
+            @click.stop
+          >
+            <div class="color-palette">
+              <button
+                v-for="c in commonPalette"
+                :key="'p-' + c"
+                class="swatch"
+                :style="{ background: c, border: isSelected(c) ? '2px solid rgba(0,0,0,0.18)' : '1px solid rgba(0,0,0,0.06)' }"
+                @click="pickColor(c)"
+                :title="c"
+              />
+            </div>
+          </div>
+        </teleport>
 
         <!-- Actions -->
         <div class="edit-actions">
@@ -291,8 +463,31 @@ function onDragStart(e: DragEvent) {
 
 .actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
+  align-items: center;
 }
+.focus-min {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.focus-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  opacity: 0.8;
+}
+.focus-toggle,
+.focus-end {
+  border: 1px solid var(--card-border);
+  background: var(--card-input-bg);
+  color: var(--card-text);
+  border-radius: 999px;
+  padding: 0 8px;
+  height: 22px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.focus-end:disabled { opacity: 0.5; cursor: not-allowed }
 
 .icon {
   background: transparent;
@@ -314,6 +509,7 @@ function onDragStart(e: DragEvent) {
   font-size: 12px;
   margin: 0;
   display: -webkit-box;
+  line-clamp: 2;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -369,6 +565,7 @@ function onDragStart(e: DragEvent) {
   flex: 1;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .lbl {
@@ -419,6 +616,44 @@ function onDragStart(e: DragEvent) {
   box-sizing: border-box;
 }
 
+.color-palette {
+  display: grid;
+  grid-template-columns: repeat(8, 28px);
+  gap: 8px;
+  align-items: center;
+}
+
+.palette-menu {
+  position: fixed;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  background: #ffffff;
+  border: 1px solid var(--card-border, #e5e7eb);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 12px 28px rgba(16, 24, 40, 0.14);
+  width: 280px; /* matches 8 columns: 8*28 + 7*8 + 2*10 padding */
+  max-width: 90vw;
+}
+
+.swatch {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.swatch:hover,
+.swatch:focus-visible {
+  transform: scale(1.08);
+  box-shadow: 0 0 0 2px var(--card-border);
+  outline: none;
+}
+
+/* no single change-color button in per-field palette mode */
+
 .color-input {
   -webkit-appearance: none;
   -moz-appearance: none;
@@ -459,7 +694,7 @@ function onDragStart(e: DragEvent) {
 
 .btn-save {
   background: var(--card-theme);
-  color: white;
+  color: var(--card-text);
   border: none;
   padding: 6px 12px;
   border-radius: 6px;
@@ -497,4 +732,45 @@ function onDragStart(e: DragEvent) {
   font-size: 12px;
   margin: 0;
 }
+
+/* Tiny focus bar */
+.focusbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--card-border);
+  background: color-mix(in srgb, var(--card-theme), #ffffff 88%);
+  color: var(--card-text);
+  border-radius: 999px;
+  width: max-content;
+}
+.focus-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  opacity: 0.9;
+}
+.focus-stop,
+.focus-resume,
+.focus-close {
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--card-text);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.focus-stop {
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.focus-resume {
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.focus-close {
+  padding: 0 6px;
+}
+
+/* removed unified preset window and progress-edit styles */
 </style>

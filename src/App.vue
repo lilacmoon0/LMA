@@ -4,10 +4,8 @@
   <div class="app">
     <nav class="nav">
       <RouterLink class="brand" to="/">LMA</RouterLink>
-
-      <RouterLink class="nav-link" to="/">Dashboard</RouterLink>
       <RouterLink class="nav-link" to="/focus-log">Focus Log</RouterLink>
-      <RouterLink class="nav-link" to="/day-summary">Day Summary</RouterLink>
+      <RouterLink class="nav-link" to="/time">Timeline</RouterLink>
     </nav>
 
     <main class="main">

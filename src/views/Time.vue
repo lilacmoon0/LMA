@@ -1,13 +1,10 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import FocusMap from '@/components/FocusMap.vue'
-import Calendar from '@/components/Calendar.vue'
-
+import Timeline from '@/components/Timeline.vue';
 </script>
 
 <template>
-  <FocusMap/>
-  <Calendar />
+  <Timeline/>
 </template>
 
 <style scoped>

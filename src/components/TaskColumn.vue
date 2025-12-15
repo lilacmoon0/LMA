@@ -160,7 +160,26 @@ async function onDrop(e: DragEvent) {
 
       <div class="add-area">
         <div v-if="addOpen" class="add-form">
-          <div class="add-inner">
+          <div
+            class="add-inner"
+            style="
+              background: white;
+              color: var(--card-text);
+              border: 1px solid var(--card-border);
+              border-radius: 8px;
+              padding: 12px;
+              box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+              display: flex;
+              flex-direction: column;
+              gap: 8px;
+              width: 100%;
+              box-sizing: border-box;
+              transition:
+                box-shadow 0.12s ease,
+                transform 0.08s ease;
+              position: relative;
+            "
+          >
             <input v-model="newTitle" placeholder="Task title" />
             <input v-model="newDescription" placeholder="Description (optional)" />
 
@@ -236,6 +255,7 @@ async function onDrop(e: DragEvent) {
   border-radius: 6px;
   font-size: 13px;
   height: 34px;
+  background-color: white;
 }
 
 .add-actions {
