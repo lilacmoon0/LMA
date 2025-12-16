@@ -4,7 +4,9 @@ import Timeline from '@/components/Timeline.vue';
 </script>
 
 <template>
-  <Timeline/>
+  <div class="page-container">
+    <Timeline />
+  </div>
 </template>
 
 <style scoped>

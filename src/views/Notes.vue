@@ -1,25 +1,15 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import TaskBoard from '../components/TaskBoard.vue'
-import { useTasksStore } from '../stores/tasks'
-const tasks = useTasksStore()
-
-onMounted(() => {
-  if (!tasks.items.length) tasks.fetchAll()
-})
+import DaySummary from '@/components/DaySummary.vue'
 </script>
 
 <template>
-  <div class="page-container page-container--full">
+  <div class="page-container">
     <el-space direction="vertical" size="large" fill>
-      <el-row :gutter="16" class="main-grid">
+      <el-row :gutter="16">
         <el-col :xs="24">
           <div class="section">
-            <div class="section-title">Task Board</div>
-            <el-card shadow="never" class="board-card">
-              <TaskBoard />
-            </el-card>
+            <DaySummary />
           </div>
         </el-col>
       </el-row>
@@ -61,10 +51,6 @@ onMounted(() => {
   font-size: 14px;
   font-weight: 700;
   color: var(--el-text-color-primary);
-}
-
-.board-card {
-  border-radius: 12px;
 }
 
 @media (max-width: 768px) {

@@ -11,7 +11,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="board">
+  <div class="board-wrap" aria-label="Task board">
     <TaskColumn
       title="To Do"
       status="todo"
@@ -19,6 +19,7 @@ onMounted(() => {
       @edit="$emit('edit', $event)"
       @remove="tasksStore.remove($event)"
     />
+
     <TaskColumn
       title="Doing"
       status="doing"
@@ -26,13 +27,15 @@ onMounted(() => {
       @edit="$emit('edit', $event)"
       @remove="tasksStore.remove($event)"
     />
+
     <TaskColumn
-      title="Today Doing"
+      title="Today"
       status="today"
       :tasks="tasksStore.byStatus('today').value"
       @edit="$emit('edit', $event)"
       @remove="tasksStore.remove($event)"
     />
+
     <TaskColumn
       title="Done"
       status="done"
@@ -44,13 +47,36 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.board {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+.board-wrap {
+  display: flex;
+  align-items: flex-start;
   gap: 12px;
-  width: 100%;
-  padding: 0 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 2px 12px;
   box-sizing: border-box;
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+  width: 100%;
+}
+
+.board-wrap > :deep(.column) {
+  flex: 1 1 0;
+  min-width: 320px;
+}
+
+@media (max-width: 768px) {
+  .board-wrap {
+    padding: 2px 0 10px;
+    scroll-snap-type: x mandatory;
+    scroll-padding: 12px;
+  }
+
+  .board-wrap > :deep(.column) {
+    flex: 0 0 92vw;
+    min-width: 92vw;
+    max-width: 92vw;
+    scroll-snap-align: start;
+  }
 }
 </style>
-*** End Patch

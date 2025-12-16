@@ -2,9 +2,10 @@
 import type { Task, TaskStatus } from '../types'
 import TaskCard from './TaskCard.vue'
 import { useTasksStore } from '../stores/tasks'
-import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useColumnsStore } from '../stores/columns'
 import { MoreVertical, RotateCcw, X, Plus } from 'lucide-vue-next'
+import Draggable from 'vuedraggable'
 
 const props = defineProps<{
   title: string
@@ -22,12 +23,14 @@ const tasksStore = useTasksStore()
 const columnsStore = useColumnsStore()
 
 const menuOpen = ref(false)
-const headerRef = ref<HTMLElement | null>(null)
 const addOpen = ref(false)
 const newTitle = ref('')
 const newDescription = ref('')
 const creating = ref(false)
 const addErr = ref('')
+
+const localTasks = ref<Task[]>([])
+const sorting = ref(false)
 
 const columnColor = computed(() => columnsStore.getColor(props.status).value || '')
 
@@ -43,23 +46,9 @@ function resetColor() {
   closeMenu()
 }
 
-function toggleMenu() {
-  menuOpen.value = !menuOpen.value
-}
-
 function closeMenu() {
   menuOpen.value = false
 }
-
-function onDocClick(e: MouseEvent) {
-  const target = e.target as Node
-  if (headerRef.value && !headerRef.value.contains(target)) {
-    closeMenu()
-  }
-}
-
-onMounted(() => document.addEventListener('click', onDocClick))
-onBeforeUnmount(() => document.removeEventListener('click', onDocClick))
 
 function toggleAdd() {
   addOpen.value = !addOpen.value
@@ -87,45 +76,60 @@ async function createTask() {
   }
 }
 
-function onDragOver(e: DragEvent) {
-  e.preventDefault()
-  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+watch(
+  () => props.tasks,
+  (next) => {
+    if (sorting.value) return
+    localTasks.value = [...(next || [])]
+  },
+  { immediate: true, deep: true },
+)
+
+function onSortStart() {
+  sorting.value = true
 }
 
-async function onDrop(e: DragEvent) {
-  e.preventDefault()
-  const idStr = e.dataTransfer?.getData('text/task-id')
-  const id = idStr ? Number(idStr) : NaN
-  if (!isNaN(id)) {
-    await tasksStore.moveTo(id, props.status)
+function onSortEnd() {
+  sorting.value = false
+  // Re-sync to the store-derived order in case it changed during drag.
+  localTasks.value = [...(props.tasks || [])]
+}
+
+async function onDragChange(evt: any) {
+  // VueDraggable emits { added, removed, moved }.
+  // We only need to update the store when an item is added to this column
+  // or moved within this column.
+  if (evt?.added?.element?.id != null) {
+    await tasksStore.moveOrReorder(Number(evt.added.element.id), props.status, Number(evt.added.newIndex ?? 0))
+    return
+  }
+  if (evt?.moved?.element?.id != null) {
+    await tasksStore.moveOrReorder(Number(evt.moved.element.id), props.status, Number(evt.moved.newIndex ?? 0))
   }
 }
 </script>
 
 <template>
-  <section
+  <el-card
     class="column"
-    @dragover="onDragOver"
-    @drop="onDrop"
+    shadow="never"
+    :body-style="{ padding: '12px' }"
     :style="columnColor ? { background: columnColor } : {}"
   >
-    <header class="column-header" ref="headerRef">
-      <h3>{{ title }}</h3>
+    <template #header>
+      <div class="column-header">
+        <div class="col-title">
+          <span class="col-title-text">{{ title }}</span>
+        </div>
 
-      <div style="display: flex; align-items: center; justify-content: center">
-        <div class="col-menu">
-          <button
-            class="menu-toggle"
-            @click.stop="toggleMenu"
-            aria-haspopup="true"
-            :aria-expanded="menuOpen"
-            aria-label="Column menu"
-            title="Column menu"
-          >
-            <MoreVertical :size="18" />
-          </button>
+        <el-popover v-model:visible="menuOpen" placement="bottom-end" trigger="click" width="220">
+          <template #reference>
+            <el-button text circle aria-label="Column menu" title="Column menu">
+              <MoreVertical :size="18" />
+            </el-button>
+          </template>
 
-          <div v-if="menuOpen" class="menu-popover">
+          <div class="menu-popover">
             <div class="color-palette">
               <template v-for="c in palette" :key="c">
                 <button
@@ -143,98 +147,108 @@ async function onDrop(e: DragEvent) {
               </template>
             </div>
 
-            <div style="display: flex; gap: 8px; margin-top: 8px">
-              <button class="menu-item" @click="resetColor" aria-label="Reset color" title="Reset color">
+            <div class="menu-actions">
+              <el-button
+                size="small"
+                @click="resetColor"
+                aria-label="Reset color"
+                title="Reset color"
+              >
                 <RotateCcw :size="16" />
-              </button>
-              <button class="menu-item" @click="closeMenu" aria-label="Close menu" title="Close menu">
+              </el-button>
+              <el-button size="small" @click="closeMenu" aria-label="Close menu" title="Close menu">
                 <X :size="16" />
-              </button>
+              </el-button>
             </div>
           </div>
-        </div>
+        </el-popover>
       </div>
-    </header>
+    </template>
 
-    <div class="list">
-      <TaskCard
-        v-for="t in tasks"
-        :key="t.id"
-        :task="t"
-        @edit="emit('edit', $event)"
-        @remove="emit('remove', $event)"
-      />
+    <Draggable
+      class="list"
+      :list="localTasks"
+      item-key="id"
+      group="tasks"
+      :animation="150"
+      :delay="220"
+      :delay-on-touch-only="true"
+      :force-fallback="true"
+      @start="onSortStart"
+      @end="onSortEnd"
+      @change="onDragChange"
+    >
+      <template #item="{ element }">
+        <div class="card-row">
+          <TaskCard :task="element" @edit="emit('edit', $event)" @remove="emit('remove', $event)" />
+        </div>
+      </template>
 
-      <div class="add-area">
-        <div v-if="addOpen" class="add-form">
-          <div
-            class="add-inner"
-            style="
-              background: white;
-              color: var(--card-text);
-              border: 1px solid var(--card-border);
-              border-radius: 8px;
-              padding: 12px;
-              box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-              display: flex;
-              flex-direction: column;
-              gap: 8px;
-              width: 100%;
-              box-sizing: border-box;
-              transition:
-                box-shadow 0.12s ease,
-                transform 0.08s ease;
-              position: relative;
-            "
-          >
-            <input v-model="newTitle" placeholder="Task title" />
-            <input v-model="newDescription" placeholder="Description (optional)" />
+      <template #footer>
+        <div class="add-area">
+          <div v-if="addOpen" class="add-form">
+            <el-card shadow="never" class="add-inner">
+              <el-space direction="vertical" size="small" fill>
+                <el-input v-model="newTitle" placeholder="Task title" />
+                <el-input v-model="newDescription" placeholder="Description (optional)" />
 
-            <div class="add-actions">
-              <button @click="createTask" :disabled="creating" aria-label="Add task" title="Add task">
-                <Plus :size="16" />
-              </button>
-              <button @click="addOpen = false" aria-label="Cancel" title="Cancel">
-                <X :size="16" />
-              </button>
-            </div>
+                <div class="add-actions">
+                  <el-button type="primary" :loading="creating" @click="createTask">
+                    <Plus :size="16" />
+                    <span style="margin-left: 6px">Add</span>
+                  </el-button>
+                  <el-button @click="addOpen = false">
+                    <X :size="16" />
+                    <span style="margin-left: 6px">Cancel</span>
+                  </el-button>
+                </div>
 
-            <p v-if="addErr" class="error">{{ addErr }}</p>
+                <el-alert v-if="addErr" :title="addErr" type="error" show-icon />
+              </el-space>
+            </el-card>
+          </div>
+
+          <div v-else class="add-inner">
+            <el-button text class="add-new" @click="toggleAdd">
+              <Plus :size="16" />
+              <span style="margin-left: 6px">Add new task</span>
+            </el-button>
           </div>
         </div>
-
-        <div class="add-inner">
-          <button v-if="!addOpen" class="add-new" @click="toggleAdd">
-            <Plus :size="16" />
-            <span>Add new task</span>
-          </button>
-        </div>
-      </div>
-    </div>
-  </section>
+      </template>
+    </Draggable>
+  </el-card>
 </template>
 
 <style scoped>
 .column {
-  background: #f9fafb;
-  padding: 12px;
-  border-radius: 10px;
-  border: 1px solid #e5e7eb;
+  background: var(--el-fill-color-lighter);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 220px;
   width: 100%;
   box-sizing: border-box;
+}
+
+.column.is-drop-target {
+  outline: 2px solid var(--el-color-primary);
+  outline-offset: 2px;
 }
 .column-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
-.count {
-  color: #6b7280;
-  font-size: 12px;
+.col-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.col-title-text {
+  font-weight: 700;
+  line-height: 1.2;
 }
 .list {
   display: flex;
@@ -243,6 +257,14 @@ async function onDrop(e: DragEvent) {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  max-height: 70vh;
+  touch-action: pan-y;
+}
+
+.card-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .add-area {
@@ -251,119 +273,38 @@ async function onDrop(e: DragEvent) {
   margin-bottom: 4px;
 }
 
-.add-new {
-  width: 100%;
-  padding: 6px 8px;
-  border-radius: 6px;
-  border: 1px dashed #d1d5db;
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.add-form input {
-  width: 100%;
-  padding: 6px 8px;
-  margin-bottom: 6px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 13px;
-  height: 34px;
-  background-color: white;
-}
-
 .add-actions {
   display: flex;
   gap: 8px;
-}
-.add-actions button:first-child {
-  background: #10b981;
-  color: white;
-  border: none;
-  padding: 5px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.add-actions button:last-child {
-  background: transparent;
-  border: 1px solid #d1d5db;
-  padding: 5px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.error {
-  color: #b91c1c;
-  margin-top: 6px;
+  justify-content: flex-end;
 }
 
 .add-inner {
   box-sizing: border-box;
-  padding: 12px;
   width: 100%;
-}
-.add-inner .add-new {
-  width: 100%;
-}
-.add-inner input {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-.col-menu {
-  position: relative;
-}
-.menu-toggle {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 2px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
 }
 .menu-popover {
-  position: absolute;
-  right: 0;
-  top: 28px;
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: 6px;
-  z-index: 20;
   display: flex;
   flex-direction: column;
-}
-.menu-item {
-  background: transparent;
-  border: none;
-  padding: 6px;
-  cursor: pointer;
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.menu-item:hover {
-  background: rgba(0, 0, 0, 0.04);
 }
 .color-palette {
   display: flex;
   gap: 6px;
+}
+.menu-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
 }
 .swatch {
   width: 28px;
   height: 20px;
   border-radius: 4px;
   cursor: pointer;
+}
+
+:deep(.el-card__header) {
+  padding: 10px 12px;
 }
 </style>

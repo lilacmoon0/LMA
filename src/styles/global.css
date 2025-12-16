@@ -1,0 +1,42 @@
+/* Global layout helpers using Element Plus theme variables */
+
+html,
+body,
+#app {
+  height: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--el-bg-color-page);
+  color: var(--el-text-color-primary);
+  overflow-x: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+a {
+  color: inherit;
+}
+
+.page-container {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.page-container.page-container--full {
+  max-width: none;
+}
+
+@media (max-width: 768px) {
+  .page-container {
+    padding: 12px;
+  }
+}

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import type { InputInstance } from 'element-plus'
 import { storeToRefs } from 'pinia'
 import type { Task } from '../types'
 import { useFocusStore } from '../stores/focusSessions'
 import { useTasksStore } from '../stores/tasks'
-import { Check, Pause, Pencil, Play, Timer, Trash2, X } from 'lucide-vue-next'
+import { Check, Pause, Pencil, Play, Timer, Trash2 } from 'lucide-vue-next'
 
 // Define Props Interface for cleaner syntax and environment compatibility
 interface TaskCardProps {
@@ -68,7 +69,7 @@ const editTextColor = ref('')
 
 const saving = ref(false)
 const editError = ref('')
-const titleRef = ref<HTMLInputElement | null>(null)
+const titleRef = ref<InputInstance | null>(null)
 
 // Minimal focus controls state (inline)
 const elapsedSec = ref(0)
@@ -143,18 +144,15 @@ function onFocusButtonClick() {
     startFocusQuick()
   } else {
     if (paused.value) {
-      // resume
       paused.value = false
       if (ticker.value) window.clearInterval(ticker.value)
       ticker.value = window.setInterval(tickElapsed, 1000)
     } else {
-      // pause
       stopFocusQuick()
     }
   }
 }
 
-// Watch for task changes to initialize edit form
 watch(
   () => props.task,
   (t) => {
@@ -163,7 +161,6 @@ watch(
     editDescription.value = t.description || ''
     editEstimated.value = t.estimated_minutes ?? 0
 
-    // Initialize colors from the Task object first, fallback to props/defaults
     editThemeColor.value = t.theme_color || props.theme_color
     editBackgroundColor.value = t.background_color || props.background_color
     editTextColor.value = t.color || props.color
@@ -171,11 +168,25 @@ watch(
   { immediate: true, deep: true },
 )
 
-// Palettes and presets (for color selection)
-// Unified palette used for theme, background, and text
-const commonPalette = ['#111827', '#374151', '#6b7280', '#000000', '#ffffff', '#fef3c7', '#fee2e2', '#ecfccb', '#e0f2fe', '#ede9fe', '#f3f4f6', '#10b981', '#2563eb', '#f59e0b', '#ef4444', '#8b5cf6']
+const commonPalette = [
+  '#111827',
+  '#374151',
+  '#6b7280',
+  '#000000',
+  '#ffffff',
+  '#fef3c7',
+  '#fee2e2',
+  '#ecfccb',
+  '#e0f2fe',
+  '#ede9fe',
+  '#f3f4f6',
+  '#10b981',
+  '#2563eb',
+  '#f59e0b',
+  '#ef4444',
+  '#8b5cf6',
+]
 
-// Palette menu (single teleported dropdown) with auto positioning
 type PaletteKind = 'theme' | 'bg' | 'text'
 const openPalette = ref<PaletteKind | null>(null)
 const menuPos = ref<{ top: number; left: number } | null>(null)
@@ -254,7 +265,7 @@ onBeforeUnmount(() => {
 function openEdit() {
   editError.value = ''
   editing.value = true
-  nextTick(() => titleRef.value?.focus())
+  nextTick(() => titleRef.value?.focus?.())
 }
 
 function closeEdit() {
@@ -284,69 +295,76 @@ async function saveEdit() {
   }
 }
 
-function onDragStart(e: DragEvent) {
-  if (!e.dataTransfer) return
-  e.dataTransfer.setData('text/task-id', String(props.task.id))
-  e.dataTransfer.effectAllowed = 'move'
-}
 </script>
 
 <template>
-  <div class="card" :style="rootStyles" draggable="true" @dragstart="onDragStart">
-    <div class="card-header">
-      <h4 class="title">
-        <router-link :to="`/tasks/${task.id}`">{{ task.title }}</router-link>
-      </h4>
-      <div class="actions">
+  <el-card
+    class="card"
+    :class="{ 'is-editing': editing }"
+    :style="rootStyles"
+    shadow="never"
+  >
+    <div class="actions">
         <!-- Show timer and End only during an active focus -->
         <template v-if="activeSession">
           <div class="focus-min">
             <span class="focus-time">{{ elapsedText }}</span>
-            <button
+            <el-button
               class="focus-toggle"
+              circle
+              size="small"
               :title="paused ? 'Resume' : 'Pause'"
               :aria-label="paused ? 'Resume focus' : 'Pause focus'"
               @click="onFocusButtonClick"
             >
               <Play v-if="paused" :size="14" />
               <Pause v-else :size="14" />
-            </button>
-            <button class="focus-end" title="End" aria-label="End focus" @click="endFocusQuick">
+            </el-button>
+            <el-button
+              class="focus-end"
+              circle
+              size="small"
+              title="End"
+              aria-label="End focus"
+              @click="endFocusQuick"
+            >
               <Check :size="14" />
-            </button>
+            </el-button>
           </div>
         </template>
         <template v-else>
-          <button class="focus-toggle" title="Focus" aria-label="Start focus" @click="onFocusButtonClick">
+          <el-button
+            class="focus-toggle"
+            circle
+            size="small"
+            title="Focus"
+            aria-label="Start focus"
+            @click="onFocusButtonClick"
+          >
             <Timer :size="14" />
-          </button>
+          </el-button>
         </template>
 
-        <button class="icon" title="Edit" aria-label="Edit" @click="openEdit">
+        <el-button text circle title="Edit" aria-label="Edit" @click="openEdit">
           <Pencil :size="16" />
-        </button>
-        <button class="icon" title="Delete" aria-label="Delete" @click="emit('remove', task.id)">
+        </el-button>
+        <el-button text circle title="Delete" aria-label="Delete" @click="emit('remove', task.id)">
           <Trash2 :size="16" />
-        </button>
+        </el-button>
       </div>
+    <div class="card-header">
+      <h4 class="title">
+        <router-link :to="`/tasks/${task.id}`">{{ task.title }}</router-link>
+      </h4>
     </div>
     <p class="desc" v-if="task.description">{{ task.description }}</p>
-
-    <div class="progress">
-      <div class="bar" :style="progressStyle"></div>
-    </div>
-    <div class="meta">
-      <span>Progress: {{ task.progress }}%</span>
-      <span>Est: {{ task.estimated_minutes }}m</span>
-      <span>Focused: {{ focusedMinutes }}m</span>
-    </div>
     <div v-if="editing" class="edit-panel">
       <div class="edit-panel-inner">
         <!-- Title -->
         <div class="edit-row">
           <div class="edit-col">
             <label class="lbl">Title</label>
-            <input ref="titleRef" v-model="editTitle" class="small-input" />
+            <el-input ref="titleRef" v-model="editTitle" size="small" />
           </div>
         </div>
 
@@ -354,7 +372,7 @@ function onDragStart(e: DragEvent) {
         <div class="edit-row">
           <div class="edit-col">
             <label class="lbl">Description</label>
-            <textarea v-model="editDescription" rows="2" class="small-textarea"></textarea>
+            <el-input v-model="editDescription" type="textarea" :rows="2" size="small" />
           </div>
         </div>
 
@@ -362,7 +380,12 @@ function onDragStart(e: DragEvent) {
         <div class="edit-row fields-row">
           <div class="edit-col small">
             <label class="lbl">Est. minutes</label>
-            <input type="number" v-model.number="editEstimated" min="0" class="small-input" />
+            <el-input-number
+              v-model="editEstimated"
+              :min="0"
+              size="small"
+              controls-position="right"
+            />
           </div>
         </div>
 
@@ -370,24 +393,39 @@ function onDragStart(e: DragEvent) {
         <div class="edit-row fields-row">
           <div class="edit-col small">
             <label class="lbl">Theme</label>
-            <button class="color-wrapper" @click.stop="openPaletteMenu('theme', $event)">
+            <el-button
+              class="color-wrapper"
+              size="small"
+              text
+              @click.stop="openPaletteMenu('theme', $event)"
+            >
               <span class="swatch" :style="{ background: editThemeColor }"></span>
               <span class="color-val">{{ editThemeColor }}</span>
-            </button>
+            </el-button>
           </div>
           <div class="edit-col small">
             <label class="lbl">Background</label>
-            <button class="color-wrapper" @click.stop="openPaletteMenu('bg', $event)">
+            <el-button
+              class="color-wrapper"
+              size="small"
+              text
+              @click.stop="openPaletteMenu('bg', $event)"
+            >
               <span class="swatch" :style="{ background: editBackgroundColor }"></span>
               <span class="color-val">{{ editBackgroundColor }}</span>
-            </button>
+            </el-button>
           </div>
           <div class="edit-col small">
             <label class="lbl">Text</label>
-            <button class="color-wrapper" @click.stop="openPaletteMenu('text', $event)">
+            <el-button
+              class="color-wrapper"
+              size="small"
+              text
+              @click.stop="openPaletteMenu('text', $event)"
+            >
               <span class="swatch" :style="{ background: editTextColor }"></span>
               <span class="color-val">{{ editTextColor }}</span>
-            </button>
+            </el-button>
           </div>
         </div>
 
@@ -404,7 +442,12 @@ function onDragStart(e: DragEvent) {
                 v-for="c in commonPalette"
                 :key="'p-' + c"
                 class="swatch"
-                :style="{ background: c, border: isSelected(c) ? '2px solid rgba(0,0,0,0.18)' : '1px solid rgba(0,0,0,0.06)' }"
+                :style="{
+                  background: c,
+                  border: isSelected(c)
+                    ? '2px solid rgba(0,0,0,0.18)'
+                    : '1px solid rgba(0,0,0,0.06)',
+                }"
                 @click="pickColor(c)"
                 :title="c"
               />
@@ -414,17 +457,24 @@ function onDragStart(e: DragEvent) {
 
         <!-- Actions -->
         <div class="edit-actions">
-          <button class="btn-save" @click="saveEdit" :disabled="saving" aria-label="Save" title="Save">
-            <Check :size="16" />
-          </button>
-          <button class="btn-cancel" @click="closeEdit" aria-label="Cancel" title="Cancel">
-            <X :size="16" />
-          </button>
+          <el-button type="primary" size="small" :loading="saving" @click="saveEdit"
+            >Save</el-button
+          >
+          <el-button size="small" @click="closeEdit">Cancel</el-button>
         </div>
-        <p v-if="editError" class="error">{{ editError }}</p>
+        <el-alert v-if="editError" :title="editError" type="error" show-icon />
       </div>
     </div>
-  </div>
+
+    <div class="card-footer">
+      <div class="progress">
+        <div class="bar" :style="progressStyle"></div>
+      </div>
+      <div class="meta">
+        <span>{{ focusedMinutes }}/{{ task.estimated_minutes ?? 0 }}m</span>
+      </div>
+    </div>
+  </el-card>
 </template>
 
 <style scoped>
@@ -434,11 +484,8 @@ function onDragStart(e: DragEvent) {
   color: var(--card-text);
   border: 1px solid var(--card-border);
   border-radius: 8px;
-  padding: 12px;
+  height: 100px;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
   width: 100%;
   box-sizing: border-box;
   transition:
@@ -446,6 +493,28 @@ function onDragStart(e: DragEvent) {
     transform 0.08s ease;
   position: relative;
   cursor: grab;
+  overflow: hidden;
+}
+
+/* Element Plus wraps content in .el-card__body; lock overflow there to avoid inner scrollbars */
+.card :deep(.el-card__body) {
+  height: 100%;
+  padding: 10px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.card.is-editing {
+  height: auto;
+  overflow: visible;
+}
+
+.card.is-editing :deep(.el-card__body) {
+  height: auto;
+  overflow: visible;
 }
 
 .card:hover {
@@ -457,23 +526,38 @@ function onDragStart(e: DragEvent) {
   cursor: grabbing;
 }
 
+.card-footer {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* Header */
 .card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
+  min-width: 0;
+  padding-right: 150px;
 }
 
 .title {
   margin: 0;
   font-size: 14px;
   cursor: pointer;
+  flex: 1;
+  min-width: 0;
 }
 
 .card-header .title a {
+  display: block;
   color: inherit;
   text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-header .title a:hover {
@@ -481,51 +565,40 @@ function onDragStart(e: DragEvent) {
 }
 
 .actions {
-  display: flex;
-  gap: 6px;
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-flex;
+  gap: 4px;
   align-items: center;
+  flex: 0 0 auto;
 }
 .focus-min {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
 }
 .focus-time {
   font-variant-numeric: tabular-nums;
   font-size: 12px;
   opacity: 0.8;
-}
-.focus-toggle,
-.focus-end {
-  border: 1px solid var(--card-border);
-  background: var(--card-input-bg);
-  color: var(--card-text);
-  border-radius: 999px;
-  padding: 0 8px;
-  height: 22px;
-  font-size: 12px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.focus-end:disabled { opacity: 0.5; cursor: not-allowed }
-
-.icon {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  padding: 2px;
-  color: var(--card-text);
-  opacity: 0.7;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  width: 44px;
+  text-align: right;
 }
 
-.icon:hover {
-  opacity: 1;
-  color: var(--card-theme);
+/* Compact the icon buttons so they don't push content outside the card */
+.actions :deep(.el-button) {
+  margin: 0;
+}
+
+.actions :deep(.el-button.is-circle) {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+}
+
+.actions :deep(.el-button.is-circle .el-icon) {
+  margin: 0;
 }
 
 .desc {
@@ -534,8 +607,8 @@ function onDragStart(e: DragEvent) {
   font-size: 12px;
   margin: 0;
   display: -webkit-box;
-  line-clamp: 2;
-  -webkit-line-clamp: 2;
+  line-clamp: 1;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -544,7 +617,7 @@ function onDragStart(e: DragEvent) {
 /* Progress */
 .progress {
   width: 100%;
-  height: 8px;
+  height: 6px;
   background: rgba(128, 128, 128, 0.15);
   border-radius: 999px;
   overflow: hidden;
@@ -558,11 +631,13 @@ function onDragStart(e: DragEvent) {
 /* Meta */
 .meta {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   color: var(--card-text);
   opacity: 0.6;
-  font-size: 12px;
+  font-size: 11px;
   align-items: center;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 /* Edit Panel */
@@ -601,23 +676,7 @@ function onDragStart(e: DragEvent) {
   display: block;
 }
 
-.small-input,
-.small-textarea {
-  width: 100%;
-  padding: 6px 8px;
-  border: 1px solid var(--card-border);
-  background: var(--card-input-bg);
-  color: var(--card-text);
-  border-radius: 6px;
-  font-size: 13px;
-  box-sizing: border-box;
-}
-
-.small-input:focus,
-.small-textarea:focus {
-  outline: 2px solid var(--card-theme);
-  border-color: transparent;
-}
+/* Inputs now use Element Plus */
 
 .fields-row {
   display: flex;
@@ -668,7 +727,9 @@ function onDragStart(e: DragEvent) {
   border-radius: 6px;
   border: 1px solid rgba(0, 0, 0, 0.06);
   cursor: pointer;
-  transition: transform 0.12s ease, box-shadow 0.12s ease;
+  transition:
+    transform 0.12s ease,
+    box-shadow 0.12s ease;
 }
 .swatch:hover,
 .swatch:focus-visible {
@@ -717,52 +778,7 @@ function onDragStart(e: DragEvent) {
   margin-top: 8px;
 }
 
-.btn-save {
-  background: var(--card-theme);
-  color: var(--card-text);
-  border: none;
-  padding: 6px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 500;
-  transition: opacity 0.2s;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-save:hover {
-  opacity: 0.9;
-}
-
-.btn-save:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.btn-cancel {
-  background: transparent;
-  border: 1px solid var(--card-border);
-  color: var(--card-text);
-  padding: 6px;
-  border-radius: 6px;
-  cursor: pointer;
-  opacity: 0.8;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.btn-cancel:hover {
-  opacity: 1;
-  background: rgba(128, 128, 128, 0.05);
-}
-
-.error {
-  color: #ef4444;
-  font-size: 12px;
-  margin: 0;
-}
+/* Errors now use Element Plus alerts */
 
 /* Tiny focus bar */
 .focusbar {
@@ -801,6 +817,12 @@ function onDragStart(e: DragEvent) {
 }
 .focus-close {
   padding: 0 6px;
+}
+
+@media (max-width: 768px) {
+  .card-header {
+    padding-right: 110px;
+  }
 }
 
 /* removed unified preset window and progress-edit styles */

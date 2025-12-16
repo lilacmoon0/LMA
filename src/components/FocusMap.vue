@@ -200,14 +200,17 @@ const options = computed<ApexOptions>(() => ({
 
 <template>
   <div class="focus-map">
-  <div class="focus-map-controls">
-      <button type="button" class="nav" @click="prevMonth" aria-label="Previous month" title="Previous month">
-        <ChevronLeft :size="18" />
-      </button>
-      <apexchart class="chart" type="heatmap" :options="options" :series="series" height="420" /> 
-      <button type="button" class="nav" @click="nextMonth" aria-label="Next month" title="Next month">
-        <ChevronRight :size="18" />
-      </button>
+    <div class="focus-map-controls">
+      <div class="nav-row">
+        <el-button circle @click="prevMonth" aria-label="Previous month" title="Previous month">
+          <ChevronLeft :size="18" />
+        </el-button>
+        <el-button circle @click="nextMonth" aria-label="Next month" title="Next month">
+          <ChevronRight :size="18" />
+        </el-button>
+      </div>
+
+      <apexchart class="chart" type="heatmap" :options="options" :series="series" height="420" />
     </div>
   </div>
   
@@ -219,23 +222,26 @@ const options = computed<ApexOptions>(() => ({
 }
 .focus-map-controls {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 10px;
   width: 100%;
   margin-bottom: 8px;
 }
-.focus-map-controls .nav {
-  border: 1px solid #ccc;
-  background: #fff;
-  border-radius: 4px;
-  padding: 6px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+
+.nav-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
 }
+
 .focus-map-controls .chart {
   flex: 1 1 0;
   min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .focus-map-controls .chart {
+    width: 100%;
+  }
 }
 </style>

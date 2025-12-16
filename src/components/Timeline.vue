@@ -10,8 +10,6 @@ import {
   ChevronRight,
   Pencil,
   Trash2,
-  X,
-  Check,
   Clock,
 } from 'lucide-vue-next'
 
@@ -351,17 +349,22 @@ onMounted(() => {
   <div class="timeline-container">
     <!-- Day selection slider -->
     <div class="day-slider">
-      <button class="day-nav-btn" @click="changeDay(-1)" aria-label="Previous day" title="Previous day">
+      <el-button circle @click="changeDay(-1)" aria-label="Previous day" title="Previous day">
         <ChevronLeft :size="18" />
-      </button>
+      </el-button>
 
       <div class="day-current">
-        <input type="date" v-model="selectedDate" />
+        <el-date-picker
+          v-model="selectedDate"
+          type="date"
+          value-format="YYYY-MM-DD"
+          placeholder="Select day"
+        />
       </div>
 
-      <button class="day-nav-btn" @click="changeDay(1)" aria-label="Next day" title="Next day">
+      <el-button circle @click="changeDay(1)" aria-label="Next day" title="Next day">
         <ChevronRight :size="18" />
-      </button>
+      </el-button>
     </div>
 
     <div class="header">
@@ -369,99 +372,59 @@ onMounted(() => {
     </div>
 
     <!-- Task + time modal (create/edit) -->
-    <div v-if="showModal" class="modal-overlay" @click.self="cancelForm">
-      <div class="modal">
-        <div class="modal-header">
-          <h3 class="modal-title">{{ editingBlockId ? 'Edit Block' : 'New Block' }}</h3>
-          <button type="button" class="icon-btn" @click="cancelForm" aria-label="Close" title="Close">
-            <X :size="18" />
-          </button>
-        </div>
+    <el-dialog
+      v-model="showModal"
+      :title="editingBlockId ? 'Edit Block' : 'New Block'"
+      width="520px"
+      @close="cancelForm"
+    >
+      <el-form label-position="top">
+        <el-form-item label="Task *">
+          <el-select v-model="selectedTaskId" placeholder="Select a task" filterable clearable>
+            <el-option v-for="task in tasksStore.items" :key="task.id" :label="task.title" :value="task.id" />
+          </el-select>
+        </el-form-item>
 
-        <form @submit.prevent="submitBlock">
-          <div class="form-group">
-            <label for="task">Task *</label>
-            <select id="task" v-model="selectedTaskId" required>
-              <option :value="null" disabled>-- Select a Task --</option>
-              <option v-for="task in tasksStore.items" :key="task.id" :value="task.id">
-                {{ task.title }}
-              </option>
-            </select>
-          </div>
+        <el-form-item label="Start Time *">
+          <el-date-picker
+            v-model="startDate"
+            type="datetime"
+            value-format="YYYY-MM-DDTHH:mm"
+            placeholder="Select start time"
+          />
+        </el-form-item>
+      </el-form>
 
-          <div class="form-group">
-            <label for="start-date">Start Time *</label>
-            <input id="start-date" v-model="startDate" type="datetime-local" required />
-          </div>
-
-          <div class="form-actions">
-            <button
-              type="button"
-              @click="cancelForm"
-              class="btn-secondary icon-btn"
-              aria-label="Cancel"
-              title="Cancel"
-            >
-              <X :size="18" />
-            </button>
-            <button
-              type="submit"
-              class="btn-primary icon-btn"
-              :aria-label="editingBlockId ? 'Save block' : 'Create block'"
-              :title="editingBlockId ? 'Save' : 'Create'"
-            >
-              <Check :size="18" />
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
+      <template #footer>
+        <el-button @click="cancelForm">Cancel</el-button>
+        <el-button type="primary" @click="submitBlock">{{ editingBlockId ? 'Save' : 'Create' }}</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Bounds modal (set/edit wake/sleep) -->
-    <div v-if="showBoundsModal" class="modal-overlay" @click.self="cancelBounds">
-      <div class="modal">
-        <div class="modal-header">
-          <h3 class="modal-title">Day Bounds</h3>
-          <button type="button" class="icon-btn" @click="cancelBounds" aria-label="Close" title="Close">
-            <X :size="18" />
-          </button>
-        </div>
+    <el-dialog v-model="showBoundsModal" title="Day Bounds" width="520px" @close="cancelBounds">
+      <el-form label-position="top">
+        <el-row :gutter="12">
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="Wake *">
+              <el-time-select v-model="wakeTime" start="00:00" step="00:05" end="23:55" />
+            </el-form-item>
+          </el-col>
+          <el-col :xs="24" :sm="12">
+            <el-form-item label="Sleep *">
+              <el-time-select v-model="sleepTime" start="00:00" step="00:05" end="23:55" />
+            </el-form-item>
+          </el-col>
+        </el-row>
 
-        <div class="form-row">
-          <div class="form-group">
-            <label for="wake">Wake *</label>
-            <input id="wake" type="time" v-model="wakeTime" />
-          </div>
-          <div class="form-group">
-            <label for="sleep">Sleep *</label>
-            <input id="sleep" type="time" v-model="sleepTime" />
-          </div>
-        </div>
+        <el-alert v-if="hasBounds && !boundsValid" title="Sleep must be after wake." type="error" show-icon />
+      </el-form>
 
-        <div v-if="hasBounds && !boundsValid" class="bounds-error">Sleep must be after wake.</div>
-
-        <div class="form-actions">
-          <button
-            type="button"
-            @click="cancelBounds"
-            class="btn-secondary icon-btn"
-            aria-label="Cancel"
-            title="Cancel"
-          >
-            <X :size="18" />
-          </button>
-          <button
-            type="button"
-            class="btn-primary icon-btn"
-            @click="saveBounds"
-            aria-label="Save"
-            title="Save"
-          >
-            <Check :size="18" />
-          </button>
-        </div>
-      </div>
-    </div>
+      <template #footer>
+        <el-button @click="cancelBounds">Cancel</el-button>
+        <el-button type="primary" @click="saveBounds">Save</el-button>
+      </template>
+    </el-dialog>
 
     <!-- Loading State -->
     <div v-if="blocksStore.loading" class="loading">Loading blocks...</div>
@@ -475,15 +438,10 @@ onMounted(() => {
     <div v-else class="day-timeline">
       <div v-if="!boundsValid" class="empty-state">
         <p>Set wake and sleep times to view the day timeline.</p>
-        <button
-          type="button"
-          class="btn-primary icon-btn"
-          @click="openBoundsEditor"
-          aria-label="Set day bounds"
-          title="Set day bounds"
-        >
+        <el-button type="primary" @click="openBoundsEditor" aria-label="Set day bounds" title="Set day bounds">
           <Clock :size="18" />
-        </button>
+          <span style="margin-left: 6px">Set day bounds</span>
+        </el-button>
       </div>
 
       <div v-else class="mainline-wrap">
@@ -504,15 +462,16 @@ onMounted(() => {
               <div class="bubble-title-row">
                 <div class="bubble-title">Wake</div>
                 <div class="bubble-actions inline">
-                  <button
-                    type="button"
-                    class="mini"
+                  <el-button
+                    text
+                    circle
+                    size="small"
                     @click.stop="openBoundsEditor"
                     aria-label="Edit day bounds"
                     title="Edit day bounds"
                   >
                     <Pencil :size="16" />
-                  </button>
+                  </el-button>
                 </div>
               </div>
               <div class="bubble-sub">{{ wakeTime }}</div>
@@ -534,24 +493,27 @@ onMounted(() => {
               <div class="bubble-title-row">
                 <div class="bubble-title">{{ getTaskTitle(block.task) }}</div>
                 <div class="bubble-actions inline">
-                  <button
-                    type="button"
-                    class="mini"
+                  <el-button
+                    text
+                    circle
+                    size="small"
                     @click.stop="editBlock(block)"
                     aria-label="Edit block"
                     title="Edit"
                   >
                     <Pencil :size="16" />
-                  </button>
-                  <button
-                    type="button"
-                    class="mini danger"
+                  </el-button>
+                  <el-button
+                    text
+                    circle
+                    size="small"
+                    type="danger"
                     @click.stop="deleteBlock(block.id)"
                     aria-label="Delete block"
                     title="Delete"
                   >
                     <Trash2 :size="16" />
-                  </button>
+                  </el-button>
                 </div>
               </div>
               <div class="bubble-sub">{{ formatTimeRange(block) }}</div>
@@ -570,10 +532,6 @@ onMounted(() => {
               <div class="bubble-sub">{{ sleepTime }}</div>
             </div>
           </div>
-        </div>
-
-        <div v-if="blocksSorted.length === 0" class="empty-state below">
-          <p>No blocks for this day. Click on the timeline to add one.</p>
         </div>
       </div>
     </div>
@@ -990,6 +948,19 @@ onMounted(() => {
 }
 
 @media (max-width: 640px) {
+  .timeline-container {
+    padding: 12px;
+  }
+
+  .mainline-wrap {
+    padding: 12px;
+  }
+
+  :deep(.el-dialog) {
+    max-width: calc(100vw - 24px);
+    margin: 12px auto;
+  }
+
   .form-row {
     grid-template-columns: 1fr;
   }
@@ -1006,6 +977,10 @@ onMounted(() => {
 
   .block-item {
     width: calc(100% - 12px);
+  }
+
+  .bubble {
+    max-width: none;
   }
 }
 </style>

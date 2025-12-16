@@ -5,7 +5,9 @@ import FocusMap from '@/components/FocusMap.vue'
 </script>
 
 <template>
-  <FocusMap/>
+  <div class="page-container">
+    <FocusMap />
+  </div>
 </template>
 
 <style scoped>

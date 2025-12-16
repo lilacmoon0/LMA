@@ -46,6 +46,60 @@ export const useTasksStore = defineStore('tasks', () => {
     return update(id, { status })
   }
 
+  function insertTaskAtStatusIndex(task: Task, status: TaskStatus, toIndex: number) {
+    const next = items.value.filter((t) => t.id !== task.id)
+    const statusIndexes: number[] = []
+    for (let i = 0; i < next.length; i++) {
+      if (next[i]?.status === status) statusIndexes.push(i)
+    }
+
+    const clampedIndex = Math.max(0, Math.min(toIndex, statusIndexes.length))
+
+    let insertIndex = next.length
+    if (statusIndexes.length === 0) {
+      insertIndex = next.length
+    } else if (clampedIndex <= 0) {
+      insertIndex = statusIndexes[0]!
+    } else if (clampedIndex >= statusIndexes.length) {
+      insertIndex = statusIndexes[statusIndexes.length - 1]! + 1
+    } else {
+      insertIndex = statusIndexes[clampedIndex]!
+    }
+
+    next.splice(insertIndex, 0, task)
+    items.value = next
+  }
+
+  function reorderLocal(taskId: number, status: TaskStatus, toIndex: number) {
+    const task = items.value.find((t) => t.id === taskId)
+    if (!task) return
+    const fixed: Task = task.status === status ? task : { ...task, status }
+    insertTaskAtStatusIndex(fixed, status, toIndex)
+  }
+
+  async function moveOrReorder(taskId: number, status: TaskStatus, toIndex: number) {
+    const task = items.value.find((t) => t.id === taskId)
+    if (!task) return
+
+    // Same column: reorder locally only (no backend ordering field exists yet)
+    if (task.status === status) {
+      reorderLocal(taskId, status, toIndex)
+      return
+    }
+
+    // Cross-column: optimistic move + placement, then persist status
+    reorderLocal(taskId, status, toIndex)
+    try {
+      const updated = await update(taskId, { status })
+      // Ensure we keep the requested lane placement after the server response.
+      reorderLocal(updated.id, status, toIndex)
+    } catch (e) {
+      // If persistence fails, refresh from server to avoid UI drift.
+      await fetchAll()
+      throw e
+    }
+  }
+
   return {
     items,
     loading,
@@ -56,5 +110,6 @@ export const useTasksStore = defineStore('tasks', () => {
     update,
     remove,
     moveTo,
+    moveOrReorder,
   }
 })
