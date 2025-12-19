@@ -32,6 +32,8 @@ watch(
           <el-menu-item index="/notes">Notes</el-menu-item>
           <el-menu-item index="/focus-log">Focus Log</el-menu-item>
           <el-menu-item index="/time">Timeline</el-menu-item>
+          <el-menu-item index="/login">Login</el-menu-item>
+          <el-menu-item index="/register">Register</el-menu-item>
         </el-menu>
 
         <el-button
@@ -50,11 +52,18 @@ watch(
       <div class="drawer-inner">
         <RouterLink class="brand brand--drawer" to="/" @click="mobileNavOpen = false">LMA</RouterLink>
 
-        <el-menu class="app-menu app-menu--mobile" :default-active="activePath" router @select="mobileNavOpen = false">
+        <el-menu
+          class="app-menu app-menu--mobile"
+          :default-active="activePath"
+          router
+          @select="mobileNavOpen = false"
+        >
           <el-menu-item index="/">Dashboard</el-menu-item>
           <el-menu-item index="/notes">Notes</el-menu-item>
           <el-menu-item index="/focus-log">Focus Log</el-menu-item>
           <el-menu-item index="/time">Timeline</el-menu-item>
+          <el-menu-item index="/login">Login</el-menu-item>
+          <el-menu-item index="/register">Register</el-menu-item>
         </el-menu>
       </div>
     </el-drawer>

@@ -8,7 +8,34 @@ function getCsrfToken(): string | undefined {
   return m && m[1] !== undefined ? decodeURIComponent(m[1]) : undefined
 }
 
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+function shouldAttemptRefresh(path: string): boolean {
+  // Avoid recursion / redundant refresh attempts on auth endpoints themselves.
+  const normalized = path.startsWith('/') ? path : `/${path}`
+  return !['/auth/login', '/auth/register', '/auth/refresh'].some(
+    (p) => normalized === p || normalized.startsWith(`${p}/`),
+  )
+}
+
+async function tryRefresh(headers: Record<string, string>): Promise<boolean> {
+  const csrf = getCsrfToken()
+  const refreshHeaders: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+    ...headers,
+  }
+  if (csrf) refreshHeaders['X-CSRFToken'] = csrf
+
+  const res = await fetch(`${BASE_URL}/auth/refresh/`, {
+    method: 'POST',
+    headers: refreshHeaders,
+    credentials: 'include',
+    body: JSON.stringify({}),
+  })
+
+  return res.ok
+}
+
+async function request<T>(path: string, options: RequestInit = {}, hasRetried = false): Promise<T> {
   const method = (options.method || 'GET').toUpperCase()
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -20,11 +47,23 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     if (csrf) headers['X-CSRFToken'] = csrf
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
+  let res = await fetch(`${BASE_URL}${path}`, {
     headers,
     credentials: 'include',
     ...options,
   })
+
+  if (res.status === 401 && !hasRetried && shouldAttemptRefresh(path)) {
+    const refreshed = await tryRefresh(headers).catch(() => false)
+    if (refreshed) {
+      res = await fetch(`${BASE_URL}${path}`, {
+        headers,
+        credentials: 'include',
+        ...options,
+      })
+    }
+  }
+
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`)
@@ -50,6 +89,11 @@ export const endpoints = {
   focusSessions: '/focus-sessions/',
   daySummaries: '/day-summaries/',
   blocks: '/blocks/',
+
+  authRegister: '/auth/register/',
+  authLogin: '/auth/login/',
+  authRefresh: '/auth/refresh/',
+  authMe: '/auth/me/',
 }
 
 export default { http, endpoints }
