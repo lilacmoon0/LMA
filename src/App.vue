@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { Menu } from 'lucide-vue-next'
+import { useAuthStore } from './stores/auth'
 
 const route = useRoute()
+const router = useRouter()
+const auth = useAuthStore()
 const activePath = computed(() => route.path)
+const isAuthed = computed(() => auth.isAuthenticated)
 
 const mobileNavOpen = ref(false)
 
@@ -14,15 +18,21 @@ watch(
     mobileNavOpen.value = false
   },
 )
+
+async function onLogout() {
+  auth.logout()
+  await router.push('/login')
+}
 </script>
 
 <template>
   <el-container class="app-shell">
     <el-header class="app-header" height="56px">
       <div class="header-inner">
-        <RouterLink class="brand" to="/">LMA</RouterLink>
+        <RouterLink class="brand" :to="isAuthed ? '/' : '/login'">LMA</RouterLink>
 
         <el-menu
+          v-if="isAuthed"
           class="app-menu app-menu--desktop"
           mode="horizontal"
           :default-active="activePath"
@@ -32,9 +42,9 @@ watch(
           <el-menu-item index="/notes">Notes</el-menu-item>
           <el-menu-item index="/focus-log">Focus Log</el-menu-item>
           <el-menu-item index="/time">Timeline</el-menu-item>
-          <el-menu-item index="/login">Login</el-menu-item>
-          <el-menu-item index="/register">Register</el-menu-item>
         </el-menu>
+
+        <el-button v-if="isAuthed" text @click="onLogout">Logout</el-button>
 
         <el-button
           class="nav-toggle"
@@ -50,9 +60,14 @@ watch(
 
     <el-drawer v-model="mobileNavOpen" direction="ltr" size="280px" :with-header="false">
       <div class="drawer-inner">
-        <RouterLink class="brand brand--drawer" to="/" @click="mobileNavOpen = false">LMA</RouterLink>
+        <RouterLink
+          class="brand brand--drawer"
+          :to="isAuthed ? '/' : '/login'"
+          @click="mobileNavOpen = false"
+        >LMA</RouterLink>
 
         <el-menu
+          v-if="isAuthed"
           class="app-menu app-menu--mobile"
           :default-active="activePath"
           router
@@ -62,9 +77,9 @@ watch(
           <el-menu-item index="/notes">Notes</el-menu-item>
           <el-menu-item index="/focus-log">Focus Log</el-menu-item>
           <el-menu-item index="/time">Timeline</el-menu-item>
-          <el-menu-item index="/login">Login</el-menu-item>
-          <el-menu-item index="/register">Register</el-menu-item>
         </el-menu>
+
+        <el-button v-if="isAuthed" text @click="onLogout">Logout</el-button>
       </div>
     </el-drawer>
 

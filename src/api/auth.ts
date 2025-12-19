@@ -1,4 +1,14 @@
 import { endpoints, http } from './client'
+import { getRefreshToken, setAccessToken, setRefreshToken } from './tokens'
+
+export type AuthTokenPair = {
+  refresh: string
+  access: string
+}
+
+export type AuthTokenResponse = AuthTokenPair & {
+  user?: AuthUser
+}
 
 export type AuthUser = {
   id?: number
@@ -22,15 +32,23 @@ export type AuthRegisterPayload = {
 
 export async function login(payload: AuthLoginPayload) {
   // Response shape depends on backend; cookies are handled via credentials: 'include'.
-  return http.post<unknown>(endpoints.authLogin, payload)
+  return http.post<AuthTokenResponse>(endpoints.authLogin, payload)
 }
 
 export async function register(payload: AuthRegisterPayload) {
-  return http.post<unknown>(endpoints.authRegister, payload)
+  return http.post<AuthTokenResponse>(endpoints.authRegister, payload)
 }
 
 export async function refresh() {
-  return http.post<unknown>(endpoints.authRefresh, {})
+  const refresh = getRefreshToken()
+  if (!refresh) throw new Error('No refresh token available')
+
+  const res = await http.post<{ access: string; refresh?: string }>(endpoints.authRefresh, {
+    refresh,
+  })
+  setAccessToken(res.access)
+  if (typeof res.refresh === 'string' && res.refresh.length > 0) setRefreshToken(res.refresh)
+  return res
 }
 
 export async function me() {

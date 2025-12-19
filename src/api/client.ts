@@ -1,5 +1,7 @@
 const BASE_URL = (import.meta as ImportMeta).env?.VITE_API_BASE || '/api'
 
+import { getAccessToken, getRefreshToken, setAccessToken, setRefreshToken } from './tokens'
+
 type HttpMethod = 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'
 
 function getCsrfToken(): string | undefined {
@@ -17,6 +19,9 @@ function shouldAttemptRefresh(path: string): boolean {
 }
 
 async function tryRefresh(headers: Record<string, string>): Promise<boolean> {
+  const refresh = getRefreshToken()
+  if (!refresh) return false
+
   const csrf = getCsrfToken()
   const refreshHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -29,10 +34,19 @@ async function tryRefresh(headers: Record<string, string>): Promise<boolean> {
     method: 'POST',
     headers: refreshHeaders,
     credentials: 'include',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ refresh }),
   })
 
-  return res.ok
+  if (!res.ok) return false
+  const data = (await res.json().catch(() => null)) as {
+    access?: unknown
+    refresh?: unknown
+  } | null
+  if (!data || typeof data.access !== 'string') return false
+
+  setAccessToken(data.access)
+  if (typeof data.refresh === 'string' && data.refresh.length > 0) setRefreshToken(data.refresh)
+  return true
 }
 
 async function request<T>(path: string, options: RequestInit = {}, hasRetried = false): Promise<T> {
@@ -42,6 +56,10 @@ async function request<T>(path: string, options: RequestInit = {}, hasRetried = 
     'X-Requested-With': 'XMLHttpRequest',
     ...(options.headers as Record<string, string> | undefined),
   }
+
+  const access = getAccessToken()
+  if (access) headers['Authorization'] = `Bearer ${access}`
+
   if (method !== 'GET' && method !== 'HEAD') {
     const csrf = getCsrfToken()
     if (csrf) headers['X-CSRFToken'] = csrf
@@ -56,6 +74,8 @@ async function request<T>(path: string, options: RequestInit = {}, hasRetried = 
   if (res.status === 401 && !hasRetried && shouldAttemptRefresh(path)) {
     const refreshed = await tryRefresh(headers).catch(() => false)
     if (refreshed) {
+      const updatedAccess = getAccessToken()
+      if (updatedAccess) headers['Authorization'] = `Bearer ${updatedAccess}`
       res = await fetch(`${BASE_URL}${path}`, {
         headers,
         credentials: 'include',

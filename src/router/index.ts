@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { getAccessToken } from '../api/tokens'
 
 const Dashboard = () => import('../views/Dashboard.vue')
 const FocusLog = () => import('../views/FocusLog.vue')
@@ -11,12 +12,29 @@ const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', name: 'dashboard', component: Dashboard },
-    { path: '/login', name: 'login', component: Login },
-    { path: '/register', name: 'register', component: Register },
+    { path: '/login', name: 'login', component: Login, meta: { public: true } },
+    { path: '/register', name: 'register', component: Register, meta: { public: true } },
     { path: '/notes', name: 'notes', component: Notes },
     { path: '/focus-log', name: 'focus-log', component: FocusLog },
     { path: '/time', name: 'time', component: Time },
   ],
+})
+
+router.beforeEach((to) => {
+  const authed = !!getAccessToken()
+  const isPublic = to.meta.public === true
+
+  // Default landing page for logged-out users.
+  if (!authed && !isPublic) {
+    return { path: '/login' }
+  }
+
+  // Logged-in users shouldn't see auth pages.
+  if (authed && isPublic) {
+    return { path: '/' }
+  }
+
+  return true
 })
 
 export default router

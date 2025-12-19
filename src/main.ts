@@ -8,10 +8,16 @@ import router from './router'
 
 import './styles/global.css'
 
+import { useAuthStore } from './stores/auth'
+
 const app = createApp(App)
 
-app.use(createPinia())
+const pinia = createPinia()
+app.use(pinia)
 app.use(router)
 app.use(ElementPlus)
+
+// Load tokens/user early so authenticated API calls work after refresh.
+void useAuthStore(pinia).hydrate()
 
 app.mount('#app')

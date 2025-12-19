@@ -49,5 +49,19 @@ export const useFocusStore = defineStore('focus-sessions', () => {
     return sessions.value.reduce((acc, s) => acc + (s.duration_minutes || 0), 0)
   }
 
-  return { sessions, activeByTask, fetchAll, start, stop, totalMinutesForTask, totalMinutesAll }
+  function clear() {
+    sessions.value = []
+    activeByTask.value = {}
+  }
+
+  return {
+    sessions,
+    activeByTask,
+    fetchAll,
+    start,
+    stop,
+    totalMinutesForTask,
+    totalMinutesAll,
+    clear,
+  }
 })

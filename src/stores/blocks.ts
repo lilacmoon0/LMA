@@ -45,6 +45,12 @@ export const useBlocksStore = defineStore('blocks', () => {
     items.value = items.value.filter((b) => b.id !== id)
   }
 
+  function clear() {
+    items.value = []
+    loading.value = false
+    error.value = null
+  }
+
   return {
     items,
     loading,
@@ -54,5 +60,6 @@ export const useBlocksStore = defineStore('blocks', () => {
     create,
     update,
     remove,
+    clear,
   }
 })

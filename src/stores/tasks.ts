@@ -100,6 +100,12 @@ export const useTasksStore = defineStore('tasks', () => {
     }
   }
 
+  function clear() {
+    items.value = []
+    loading.value = false
+    error.value = null
+  }
+
   return {
     items,
     loading,
@@ -111,5 +117,6 @@ export const useTasksStore = defineStore('tasks', () => {
     remove,
     moveTo,
     moveOrReorder,
+    clear,
   }
 })

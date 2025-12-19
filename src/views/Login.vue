@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '../stores/auth'
 import type { FormInstance, FormRules } from 'element-plus'
@@ -12,34 +12,14 @@ const auth = useAuthStore()
 const submitting = ref(false)
 
 const form = reactive({
-  username: '',
-  email: '',
+  identifier: '',
   password: '',
 })
 
+const identifierIsEmail = computed(() => form.identifier.includes('@'))
+
 const rules: FormRules = {
-  username: [
-    {
-      validator: (_rule: unknown, value: string, cb: (err?: Error) => void) => {
-        const hasUsername = value.trim().length > 0
-        const hasEmail = form.email.trim().length > 0
-        if (!hasUsername && !hasEmail) cb(new Error('Enter username or email'))
-        else cb()
-      },
-      trigger: 'blur',
-    },
-  ],
-  email: [
-    {
-      validator: (_rule: unknown, value: string, cb: (err?: Error) => void) => {
-        const hasEmail = value.trim().length > 0
-        const hasUsername = form.username.trim().length > 0
-        if (!hasEmail && !hasUsername) cb(new Error('Enter email or username'))
-        else cb()
-      },
-      trigger: 'blur',
-    },
-  ],
+  identifier: [{ required: true, message: 'Enter username or email', trigger: 'blur' }],
   password: [{ required: true, message: 'Password is required', trigger: 'blur' }],
 }
 
@@ -52,10 +32,10 @@ async function onSubmit() {
 
   submitting.value = true
   try {
+    const identifier = form.identifier.trim()
     await auth.login({
       password: form.password,
-      ...(form.username.trim() ? { username: form.username.trim() } : {}),
-      ...(form.email.trim() ? { email: form.email.trim() } : {}),
+      ...(identifierIsEmail.value ? { email: identifier } : { username: identifier }),
     })
     await router.push('/')
   } finally {
@@ -84,12 +64,12 @@ async function onSubmit() {
         />
 
         <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-          <el-form-item label="Username" prop="username">
-            <el-input v-model="form.username" autocomplete="username" />
-          </el-form-item>
-
-          <el-form-item label="Email" prop="email">
-            <el-input v-model="form.email" autocomplete="email" />
+          <el-form-item :label="identifierIsEmail ? 'Email' : 'Username'" prop="identifier">
+            <el-input
+              v-model="form.identifier"
+              :type="identifierIsEmail ? 'email' : 'text'"
+              :autocomplete="identifierIsEmail ? 'email' : 'username'"
+            />
           </el-form-item>
 
           <el-form-item label="Password" prop="password">

@@ -47,5 +47,10 @@ export const useDaySummaryStore = defineStore('day-summaries', () => {
     }
   }
 
-  return { items, current, fetchAll, fetchToday, saveToday }
+  function clear() {
+    items.value = []
+    current.value = null
+  }
+
+  return { items, current, fetchAll, fetchToday, saveToday, clear }
 })
