@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import type { InputInstance } from 'element-plus'
-import { storeToRefs } from 'pinia'
 import type { Task } from '../types'
-import { useFocusStore } from '../stores/focusSessions'
 import { useTasksStore } from '../stores/tasks'
-import { Check, Pause, Pencil, Play, Timer, Trash2 } from 'lucide-vue-next'
+import { Pencil, Trash2 } from 'lucide-vue-next'
 
 // Define Props Interface for cleaner syntax and environment compatibility
 interface TaskCardProps {
@@ -27,8 +25,6 @@ const emit = defineEmits<{
   (e: 'remove', id: number): void
 }>()
 
-const focusStore = useFocusStore()
-const { activeByTask } = storeToRefs(focusStore)
 const tasksStore = useTasksStore()
 
 const effectiveThemeColor = computed(() => props.task.theme_color || props.theme_color)
@@ -50,8 +46,6 @@ const rootStyles = computed(() => ({
       : `color-mix(in srgb, ${effectiveBgColor.value}, white 10%)`,
 }))
 
-const focusedMinutes = computed(() => focusStore.totalMinutesForTask(props.task.id))
-
 const progressStyle = computed(() => ({
   width: `${Math.min(100, Math.max(0, props.task.progress))}%`,
 }))
@@ -71,87 +65,7 @@ const saving = ref(false)
 const editError = ref('')
 const titleRef = ref<InputInstance | null>(null)
 
-// Minimal focus controls state (inline)
-const elapsedSec = ref(0)
-const ticker = ref<number | null>(null)
-const paused = ref(false)
-const activeSession = computed(() => activeByTask.value[props.task.id] || null)
 
-function tickElapsed() {
-  if (!paused.value) {
-    elapsedSec.value += 1
-  }
-}
-
-const elapsedText = computed(() => {
-  const m = Math.floor(elapsedSec.value / 60)
-  const s = elapsedSec.value % 60
-  return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
-})
-
-watch(
-  () => activeSession.value?.id,
-  () => {
-    if (activeSession.value) {
-      // start local timer
-      paused.value = false
-      elapsedSec.value = 0
-      if (ticker.value) window.clearInterval(ticker.value)
-      ticker.value = window.setInterval(tickElapsed, 1000)
-    } else {
-      // clear when session ends
-      paused.value = false
-      if (ticker.value) {
-        window.clearInterval(ticker.value)
-        ticker.value = null
-      }
-      elapsedSec.value = 0
-    }
-  },
-  { immediate: true },
-)
-
-onBeforeUnmount(() => {
-  if (ticker.value) window.clearInterval(ticker.value)
-})
-
-async function startFocusQuick() {
-  await focusStore.start(props.task.id, '')
-}
-
-function stopFocusQuick() {
-  if (!activeSession.value) return
-  // Pause locally without ending the session
-  paused.value = true
-  if (ticker.value) {
-    window.clearInterval(ticker.value)
-    ticker.value = null
-  }
-}
-
-async function endFocusQuick() {
-  if (!activeSession.value) return
-  await focusStore.stop(activeSession.value.id, true)
-  paused.value = false
-  if (ticker.value) {
-    window.clearInterval(ticker.value)
-    ticker.value = null
-  }
-}
-
-function onFocusButtonClick() {
-  if (!activeSession.value) {
-    startFocusQuick()
-  } else {
-    if (paused.value) {
-      paused.value = false
-      if (ticker.value) window.clearInterval(ticker.value)
-      ticker.value = window.setInterval(tickElapsed, 1000)
-    } else {
-      stopFocusQuick()
-    }
-  }
-}
 
 watch(
   () => props.task,
@@ -191,20 +105,22 @@ type PaletteKind = 'theme' | 'bg' | 'text'
 const openPalette = ref<PaletteKind | null>(null)
 const menuPos = ref<{ top: number; left: number } | null>(null)
 
-const MENU_W = 360
+const MENU_W = 280
 const MENU_H = 224
 
 function computeMenuPosition(anchorEl: HTMLElement) {
   const rect = anchorEl.getBoundingClientRect()
   const vw = window.innerWidth
   const vh = window.innerHeight
+  const menuW = Math.min(MENU_W, Math.max(200, vw - 16))
+  const menuH = Math.min(MENU_H, Math.max(160, vh - 16))
   let top = rect.bottom + 6
   let left = rect.left
-  if (top + MENU_H > vh - 8 && rect.top - 6 - MENU_H >= 8) {
-    top = rect.top - 6 - MENU_H
+  if (top + menuH > vh - 8 && rect.top - 6 - menuH >= 8) {
+    top = rect.top - 6 - menuH
   }
-  if (left + MENU_W > vw - 8) {
-    left = Math.max(8, vw - MENU_W - 8)
+  if (left + menuW > vw - 8) {
+    left = Math.max(8, vw - menuW - 8)
   }
   if (left < 8) left = 8
   if (top < 8) top = 8
@@ -305,46 +221,6 @@ async function saveEdit() {
     shadow="never"
   >
     <div class="actions">
-        <!-- Show timer and End only during an active focus -->
-        <template v-if="activeSession">
-          <div class="focus-min">
-            <span class="focus-time">{{ elapsedText }}</span>
-            <el-button
-              class="focus-toggle"
-              circle
-              size="small"
-              :title="paused ? 'Resume' : 'Pause'"
-              :aria-label="paused ? 'Resume focus' : 'Pause focus'"
-              @click="onFocusButtonClick"
-            >
-              <Play v-if="paused" :size="14" />
-              <Pause v-else :size="14" />
-            </el-button>
-            <el-button
-              class="focus-end"
-              circle
-              size="small"
-              title="End"
-              aria-label="End focus"
-              @click="endFocusQuick"
-            >
-              <Check :size="14" />
-            </el-button>
-          </div>
-        </template>
-        <template v-else>
-          <el-button
-            class="focus-toggle"
-            circle
-            size="small"
-            title="Focus"
-            aria-label="Start focus"
-            @click="onFocusButtonClick"
-          >
-            <Timer :size="14" />
-          </el-button>
-        </template>
-
         <el-button text circle title="Edit" aria-label="Edit" @click="openEdit">
           <Pencil :size="16" />
         </el-button>
@@ -471,7 +347,7 @@ async function saveEdit() {
         <div class="bar" :style="progressStyle"></div>
       </div>
       <div class="meta">
-        <span>{{ focusedMinutes }}/{{ task.estimated_minutes ?? 0 }}m</span>
+        <span>{{ task.estimated_minutes ?? 0 }}m</span>
       </div>
     </div>
   </el-card>
@@ -572,18 +448,6 @@ async function saveEdit() {
   gap: 4px;
   align-items: center;
   flex: 0 0 auto;
-}
-.focus-min {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.focus-time {
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  opacity: 0.8;
-  width: 44px;
-  text-align: right;
 }
 
 /* Compact the icon buttons so they don't push content outside the card */
@@ -709,7 +573,7 @@ async function saveEdit() {
 
 .palette-menu {
   position: fixed;
-  top: calc(100% + 6px);
+  top: 0;
   left: 0;
   z-index: 30;
   background: #ffffff;
@@ -719,6 +583,27 @@ async function saveEdit() {
   box-shadow: 0 12px 28px rgba(16, 24, 40, 0.14);
   width: 280px; /* matches 8 columns: 8*28 + 7*8 + 2*10 padding */
   max-width: 90vw;
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+}
+
+@media (max-width: 420px) {
+  .color-palette {
+    grid-template-columns: repeat(6, 28px);
+    gap: 6px;
+  }
+  .palette-menu {
+    width: 232px; /* 6*28 + 5*6 + 2*10 */
+  }
+}
+
+@media (max-width: 340px) {
+  .color-palette {
+    grid-template-columns: repeat(5, 28px);
+  }
+  .palette-menu {
+    width: 198px; /* 5*28 + 4*6 + 2*10 */
+  }
 }
 
 .swatch {
@@ -780,48 +665,16 @@ async function saveEdit() {
 
 /* Errors now use Element Plus alerts */
 
-/* Tiny focus bar */
-.focusbar {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 4px;
-  padding: 4px 8px;
-  border: 1px solid var(--card-border);
-  background: color-mix(in srgb, var(--card-theme), #ffffff 88%);
-  color: var(--card-text);
-  border-radius: 999px;
-  width: max-content;
-}
-.focus-time {
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  opacity: 0.9;
-}
-.focus-stop,
-.focus-resume,
-.focus-close {
-  border: 1px solid var(--card-border);
-  background: var(--card-bg);
-  color: var(--card-text);
-  border-radius: 999px;
-  padding: 2px 8px;
-  font-size: 12px;
-  cursor: pointer;
-}
-.focus-stop {
-  border-color: rgba(239, 68, 68, 0.3);
-}
-.focus-resume {
-  border-color: rgba(16, 185, 129, 0.3);
-}
-.focus-close {
-  padding: 0 6px;
-}
 
 @media (max-width: 768px) {
   .card-header {
     padding-right: 110px;
+  }
+}
+
+@media (max-width: 420px) {
+  .card-header {
+    padding-right: 92px;
   }
 }
 

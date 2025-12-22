@@ -18,6 +18,7 @@ onMounted(() => {
       :tasks="tasksStore.byStatus('todo').value"
       @edit="$emit('edit', $event)"
       @remove="tasksStore.remove($event)"
+      default-color="#ede9fe"
     />
 
     <TaskColumn
@@ -26,6 +27,7 @@ onMounted(() => {
       :tasks="tasksStore.byStatus('doing').value"
       @edit="$emit('edit', $event)"
       @remove="tasksStore.remove($event)"
+      default-color="#e0f2fe"
     />
 
     <TaskColumn
@@ -34,6 +36,7 @@ onMounted(() => {
       :tasks="tasksStore.byStatus('today').value"
       @edit="$emit('edit', $event)"
       @remove="tasksStore.remove($event)"
+      default-color="#fee2e2"
     />
 
     <TaskColumn
@@ -42,6 +45,7 @@ onMounted(() => {
       :tasks="tasksStore.byStatus('done').value"
       @edit="$emit('edit', $event)"
       @remove="tasksStore.remove($event)"
+      default-color="#ecfccb"
     />
   </div>
 </template>
@@ -68,15 +72,12 @@ onMounted(() => {
 @media (max-width: 768px) {
   .board-wrap {
     padding: 2px 0 10px;
-    scroll-snap-type: x mandatory;
-    scroll-padding: 12px;
   }
 
   .board-wrap > :deep(.column) {
     flex: 0 0 92vw;
     min-width: 92vw;
     max-width: 92vw;
-    scroll-snap-align: start;
   }
 }
 </style>

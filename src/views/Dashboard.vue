@@ -11,65 +11,55 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="page-container page-container--full">
-    <el-space direction="vertical" size="large" fill>
-      <el-row :gutter="16" class="main-grid">
-        <el-col :xs="24">
-          <div class="section">
-            <div class="section-title">Task Board</div>
-            <el-card shadow="never" class="board-card">
-              <TaskBoard />
-            </el-card>
-          </div>
-        </el-col>
-      </el-row>
-    </el-space>
+  <div class="page-container page-container--full dashboard">
+    <div class="board-surface">
+      <TaskBoard />
+    </div>
   </div>
 </template>
 
 <style scoped>
-.hero {
-  border-radius: 12px;
-}
 
-.hero-row {
+.dashboard {
+  min-height: 100dvh;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 12px;
 }
 
-.hero-text {
+.dashboard-header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
-.page-title {
-  font-size: 20px;
+.dashboard-title {
+  font-size: 16px;
   font-weight: 800;
   line-height: 1.2;
-}
-
-.section {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.section-title {
-  font-size: 14px;
-  font-weight: 700;
   color: var(--el-text-color-primary);
 }
 
-.board-card {
+.dashboard-subtitle {
+  font-size: 12px;
+  color: var(--el-text-color-regular);
+}
+
+.board-surface {
+  flex: 1;
+  min-height: 0;
   border-radius: 12px;
+  padding: 8px;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  /* Make column lists feel like Trello (taller scroll areas) */
+  --column-list-max-height: calc(100dvh - 200px);
 }
 
 @media (max-width: 768px) {
-  .page-title {
-    font-size: 18px;
+  .board-surface {
+    padding: 6px;
+    --column-list-max-height: calc(100dvh - 220px);
   }
 }
 </style>

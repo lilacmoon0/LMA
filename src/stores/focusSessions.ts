@@ -10,6 +10,21 @@ export const useFocusStore = defineStore('focus-sessions', () => {
   async function fetchAll() {
     const res = await http.get<Paginated<FocusSession> | FocusSession[]>(endpoints.focusSessions)
     sessions.value = Array.isArray(res) ? res : (res?.results ?? [])
+
+    // Rebuild active sessions map from data (supports page reloads).
+    const nextActive: Record<number, FocusSession | null> = {}
+    for (const s of sessions.value) {
+      if (s.ended_at !== null) continue
+      const existing = nextActive[s.task]
+      if (!existing) {
+        nextActive[s.task] = s
+        continue
+      }
+      if (new Date(s.started_at).getTime() > new Date(existing.started_at).getTime()) {
+        nextActive[s.task] = s
+      }
+    }
+    activeByTask.value = nextActive
   }
 
   async function start(taskId: number, notes = '') {

@@ -38,10 +38,10 @@ async function onLogout() {
           :default-active="activePath"
           router
         >
-          <el-menu-item index="/">Dashboard</el-menu-item>
-          <el-menu-item index="/notes">Notes</el-menu-item>
-          <el-menu-item index="/focus-log">Focus Log</el-menu-item>
+          <el-menu-item index="/">Kanban</el-menu-item>
           <el-menu-item index="/time">Timeline</el-menu-item>
+          <el-menu-item index="/notes">Notes</el-menu-item>
+          <el-menu-item index="/focus-log">Focus Map</el-menu-item>
         </el-menu>
 
         <el-button v-if="isAuthed" text @click="onLogout">Logout</el-button>
@@ -73,7 +73,7 @@ async function onLogout() {
           router
           @select="mobileNavOpen = false"
         >
-          <el-menu-item index="/">Dashboard</el-menu-item>
+          <el-menu-item index="/">Kanban</el-menu-item>
           <el-menu-item index="/notes">Notes</el-menu-item>
           <el-menu-item index="/focus-log">Focus Log</el-menu-item>
           <el-menu-item index="/time">Timeline</el-menu-item>
@@ -110,17 +110,61 @@ async function onLogout() {
   display: flex;
   align-items: center;
   gap: 12px;
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 0 clamp(12px, 2vw, 16px);
 }
 
 .brand {
-  font-weight: 700;
+  font-weight: 800;
+  letter-spacing: 0.2px;
   text-decoration: none;
-  padding: 0 4px;
+  display: inline-flex;
+  align-items: center;
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border: 1px solid var(--el-border-color-lighter);
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-primary);
+  user-select: none;
+}
+
+.brand:hover {
+  background: var(--el-fill-color);
 }
 
 .app-menu {
   flex: 1;
   min-width: 0;
+  border-bottom: none;
+}
+
+.app-menu--desktop {
+  height: 56px;
+  display: flex;
+  align-items: center;
+}
+
+/* Make the horizontal menu feel more modern (pill hover/active). */
+.app-menu--desktop:deep(.el-menu-item) {
+  border-bottom: none !important;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 10px;
+  margin: 0 2px;
+  height: 36px;
+  line-height: 36px;
+}
+
+.app-menu--desktop:deep(.el-menu-item:hover) {
+  background: var(--el-fill-color-light);
+}
+
+.app-menu--desktop:deep(.el-menu-item.is-active) {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
 }
 
 .nav-toggle {
@@ -137,6 +181,10 @@ async function onLogout() {
   display: inline-flex;
   align-items: center;
   height: 40px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  border-radius: 0;
 }
 
 .app-main {

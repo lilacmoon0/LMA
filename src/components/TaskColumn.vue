@@ -2,21 +2,32 @@
 import type { Task, TaskStatus } from '../types'
 import TaskCard from './TaskCard.vue'
 import { useTasksStore } from '../stores/tasks'
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useColumnsStore } from '../stores/columns'
 import { MoreVertical, RotateCcw, X, Plus } from 'lucide-vue-next'
 import Draggable from 'vuedraggable'
 
-const props = defineProps<{
-  title: string
-  status: TaskStatus
-  tasks: Task[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    title: string
+    status: TaskStatus
+    tasks: Task[]
+    defaultColor?: string
+    sortable?: boolean
+    externalDropSelector?: string
+  }>(),
+  {
+    defaultColor: '#f3f4f6',
+    sortable: true,
+    externalDropSelector: '',
+  },
+)
 
 const emit = defineEmits<{
   (e: 'edit', task: Task): void
   (e: 'remove', id: number): void
   (e: 'card-color', title: string): void
+  (e: 'external-drop', payload: { taskId: number; clientX: number; clientY: number }): void
 }>()
 
 const tasksStore = useTasksStore()
@@ -32,8 +43,32 @@ const addErr = ref('')
 const localTasks = ref<Task[]>([])
 const sorting = ref(false)
 
-const columnColor = computed(() => columnsStore.getColor(props.status).value || '')
+const draggingTaskId = ref<number | null>(null)
+const lastPoint = ref<{ x: number; y: number } | null>(null)
 
+function onPointerMove(e: PointerEvent) {
+  lastPoint.value = { x: e.clientX, y: e.clientY }
+}
+
+function onTouchMove(e: TouchEvent) {
+  const t = e.touches.item(0)
+  if (!t) return
+  lastPoint.value = { x: t.clientX, y: t.clientY }
+}
+
+function startTrackingPointer() {
+  lastPoint.value = null
+  window.addEventListener('pointermove', onPointerMove, { passive: true })
+  window.addEventListener('touchmove', onTouchMove, { passive: true })
+}
+
+function stopTrackingPointer() {
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('touchmove', onTouchMove)
+}
+
+const storedColor = columnsStore.getColor(props.status)
+const columnColor = computed(() => storedColor.value || props.defaultColor || '')
 const palette = ['#ffffff', '#fef3c7', '#fee2e2', '#ecfccb', '#e0f2fe', '#ede9fe', '#f3f4f6']
 
 function pickColor(color: string) {
@@ -85,26 +120,66 @@ watch(
   { immediate: true, deep: true },
 )
 
-function onSortStart() {
+type SortableStartEvent = { item?: { dataset?: Record<string, string> } }
+type SortableEndEvent = { originalEvent?: { clientX?: number; clientY?: number } }
+
+function onSortStart(evt: unknown) {
   sorting.value = true
+  const e = evt as SortableStartEvent | null
+  const idRaw = e?.item?.dataset?.taskId
+  if (idRaw == null) {
+    draggingTaskId.value = null
+  } else {
+    const id = Number(idRaw)
+    draggingTaskId.value = Number.isFinite(id) ? id : null
+  }
+  startTrackingPointer()
 }
 
-function onSortEnd() {
+function onSortEnd(evt: unknown) {
   sorting.value = false
+
+  // Fire an external drop (e.g. onto Timeline) if configured.
+  const taskId = draggingTaskId.value
+  draggingTaskId.value = null
+
+  const e = evt as SortableEndEvent | null
+  const x = e?.originalEvent?.clientX ?? lastPoint.value?.x
+  const y = e?.originalEvent?.clientY ?? lastPoint.value?.y
+
+  stopTrackingPointer()
+
+  if (props.externalDropSelector && taskId != null && x != null && y != null) {
+    const el = document.elementFromPoint(x, y) as HTMLElement | null
+    if (el?.closest(props.externalDropSelector)) {
+      emit('external-drop', { taskId, clientX: x, clientY: y })
+    }
+  }
+
   // Re-sync to the store-derived order in case it changed during drag.
   localTasks.value = [...(props.tasks || [])]
 }
 
-async function onDragChange(evt: any) {
+onBeforeUnmount(() => {
+  stopTrackingPointer()
+})
+
+type DragChangeEvent = {
+  added?: { element?: { id?: number | string }; newIndex?: number }
+  moved?: { element?: { id?: number | string }; newIndex?: number }
+}
+
+async function onDragChange(evt: unknown) {
+  const e = evt as DragChangeEvent | null
   // VueDraggable emits { added, removed, moved }.
   // We only need to update the store when an item is added to this column
   // or moved within this column.
-  if (evt?.added?.element?.id != null) {
-    await tasksStore.moveOrReorder(Number(evt.added.element.id), props.status, Number(evt.added.newIndex ?? 0))
+  if (e?.added?.element?.id != null) {
+    await tasksStore.moveOrReorder(Number(e.added.element.id), props.status, Number(e.added.newIndex ?? 0))
     return
   }
-  if (evt?.moved?.element?.id != null) {
-    await tasksStore.moveOrReorder(Number(evt.moved.element.id), props.status, Number(evt.moved.newIndex ?? 0))
+  if (e?.moved?.element?.id != null) {
+    await tasksStore.moveOrReorder(Number(e.moved.element.id), props.status, Number(e.moved.newIndex ?? 0))
   }
 }
 </script>
@@ -114,7 +189,7 @@ async function onDragChange(evt: any) {
     class="column"
     shadow="never"
     :body-style="{ padding: '12px' }"
-    :style="columnColor ? { background: columnColor } : {}"
+    :style="columnColor ? { background: columnColor } : { background: props.defaultColor }"
   >
     <template #header>
       <div class="column-header">
@@ -170,6 +245,7 @@ async function onDragChange(evt: any) {
       :list="localTasks"
       item-key="id"
       group="tasks"
+      :sort="props.sortable"
       :animation="150"
       :delay="220"
       :delay-on-touch-only="true"
@@ -179,7 +255,7 @@ async function onDragChange(evt: any) {
       @change="onDragChange"
     >
       <template #item="{ element }">
-        <div class="card-row">
+        <div class="card-row" :data-task-id="element.id">
           <TaskCard :task="element" @edit="emit('edit', $event)" @remove="emit('remove', $event)" />
         </div>
       </template>
@@ -290,6 +366,7 @@ async function onDragChange(evt: any) {
 .color-palette {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
 }
 .menu-actions {
   display: flex;

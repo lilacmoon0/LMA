@@ -1,10 +1,11 @@
 <!-- eslint-disable vue/multi-word-component-names -->
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useBlocksStore } from '../stores/blocks'
 import { useTasksStore } from '../stores/tasks'
 import { useDayBoundsStore } from '../stores/dayBounds'
 import type { Block } from '../types'
+import TaskColumn from './TaskColumn.vue'
 import {
   ChevronLeft,
   ChevronRight,
@@ -16,6 +17,8 @@ import {
 const blocksStore = useBlocksStore()
 const tasksStore = useTasksStore()
 const dayBoundsStore = useDayBoundsStore()
+
+const todayTasks = tasksStore.byStatus('today')
 
 // Modal state
 const showModal = ref(false)
@@ -87,6 +90,15 @@ const parseHm = (hm: string) => {
 const minutesToHm = (mins: number) => {
   const m = Math.max(0, Math.min(23 * 60 + 59, Math.round(mins)))
   return `${pad(Math.floor(m / 60))}:${pad(m % 60)}`
+}
+
+function utcIsoForSelectedDayMinutes(minutesFromMidnight: number) {
+  const { y, m, d } = parseSelectedYmd(selectedDate.value)
+  const hh = Math.floor(minutesFromMidnight / 60)
+  const mm = Math.round(minutesFromMidnight % 60)
+  const date = new Date(y, m - 1, d, hh, mm, 0)
+  const startLocal = toLocalDateTimeInputValue(date)
+  return toUtcISOStringFromLocalInput(startLocal)
 }
 
 const saveBounds = () => {
@@ -279,6 +291,69 @@ const hourTicks = computed(() => {
 
 const timelineTrackRef = ref<HTMLElement | null>(null)
 
+// --- Swipe navigation (mobile) ---
+const swipeStart = ref<{ x: number; y: number; t: number } | null>(null)
+const swipeIndicator = ref<'prev' | 'next' | null>(null)
+let swipeIndicatorTimer: number | null = null
+
+function flashSwipeIndicator(dir: 'prev' | 'next') {
+  swipeIndicator.value = dir
+  if (swipeIndicatorTimer != null) window.clearTimeout(swipeIndicatorTimer)
+  swipeIndicatorTimer = window.setTimeout(() => {
+    swipeIndicator.value = null
+    swipeIndicatorTimer = null
+  }, 450)
+}
+
+function isInteractiveEl(target: EventTarget | null) {
+  const el = target as HTMLElement | null
+  if (!el) return false
+  return !!el.closest(
+    'input, textarea, select, button, a, .el-input, .el-select, .el-date-editor, .el-picker-panel, .el-dialog, .el-overlay, .el-button',
+  )
+}
+
+function isBlockEl(target: EventTarget | null) {
+  const el = target as HTMLElement | null
+  return !!el?.closest('.block-item')
+}
+
+function onTouchStart(e: TouchEvent) {
+  if (showModal.value || showBoundsModal.value) return
+  if (isInteractiveEl(e.target)) return
+  if (isDraggingBlock.value || isBlockEl(e.target)) return
+  if (e.touches.length !== 1) return
+  const touch = e.touches.item(0)
+  if (!touch) return
+  swipeStart.value = { x: touch.clientX, y: touch.clientY, t: Date.now() }
+}
+
+function onTouchEnd(e: TouchEvent) {
+  if (!swipeStart.value) return
+  if (isDraggingBlock.value) {
+    swipeStart.value = null
+    return
+  }
+  const start = swipeStart.value
+  swipeStart.value = null
+  if (e.changedTouches.length !== 1) return
+  const touch = e.changedTouches.item(0)
+  if (!touch) return
+  const dx = touch.clientX - start.x
+  const dy = touch.clientY - start.y
+
+  const absX = Math.abs(dx)
+  const absY = Math.abs(dy)
+  if (absX < 60) return
+  if (absX < absY * 1.2) return
+  if (Date.now() - start.t > 650) return
+
+  // Swipe left -> next day, swipe right -> previous day.
+  const dir = dx < 0 ? 'next' : 'prev'
+  flashSwipeIndicator(dir)
+  changeDay(dir === 'next' ? 1 : -1)
+}
+
 const setStartDateFromMinutes = (minutesFromMidnight: number) => {
   const { y, m, d } = parseSelectedYmd(selectedDate.value)
   const hm = minutesToHm(minutesFromMidnight)
@@ -302,6 +377,292 @@ const onTimelineClick = (e: MouseEvent) => {
   editingBlockId.value = null
   setStartDateFromMinutes(rounded)
   showModal.value = true
+}
+
+// --- Drag-to-reschedule blocks ---
+const isDraggingBlock = ref(false)
+const draggingBlockId = ref<number | null>(null)
+const draggingTopPx = ref<number | null>(null)
+const draggingStartMinutes = ref<number | null>(null)
+
+const BLOCK_LONGPRESS_MS = 800
+const BLOCK_CANCEL_MOVE_PX = 14
+
+type BlockDragState = {
+  blockId: number
+  pointerId: number
+  startClientY: number
+  startMinutes: number
+  durationMinutes: number
+  moved: boolean
+}
+
+let blockDrag: BlockDragState | null = null
+
+type PendingBlockDragState = {
+  blockId: number
+  pointerId: number
+  startClientX: number
+  startClientY: number
+  lastClientY: number
+  startMinutes: number
+  durationMinutes: number
+  captureEl: HTMLElement | null
+}
+
+let pendingBlockDrag: PendingBlockDragState | null = null
+let pendingBlockDragTimer: number | null = null
+
+function preventTouchScroll(e: TouchEvent) {
+  // Only active during a drag; prevents the browser from scrolling the page.
+  e.preventDefault()
+}
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n))
+}
+
+function roundTo5(mins: number) {
+  return Math.round(mins / 5) * 5
+}
+
+function clearPendingBlockDrag() {
+  if (pendingBlockDragTimer != null) {
+    window.clearTimeout(pendingBlockDragTimer)
+    pendingBlockDragTimer = null
+  }
+  pendingBlockDrag = null
+  window.removeEventListener('pointermove', onPendingBlockPointerMove)
+  window.removeEventListener('pointerup', onPendingBlockPointerUp)
+  window.removeEventListener('pointercancel', onPendingBlockPointerUp)
+}
+
+function beginBlockDrag(state: {
+  blockId: number
+  pointerId: number
+  startClientY: number
+  startMinutes: number
+  durationMinutes: number
+  captureEl?: HTMLElement | null
+}) {
+  if (state.captureEl) {
+    try {
+      state.captureEl.setPointerCapture(state.pointerId)
+    } catch {
+      // Ignore if unsupported.
+    }
+  }
+
+  isDraggingBlock.value = true
+  draggingBlockId.value = state.blockId
+  draggingStartMinutes.value = state.startMinutes
+  draggingTopPx.value = markerForMinutes(state.startMinutes)
+
+  blockDrag = {
+    blockId: state.blockId,
+    pointerId: state.pointerId,
+    startClientY: state.startClientY,
+    startMinutes: state.startMinutes,
+    durationMinutes: state.durationMinutes,
+    moved: false,
+  }
+
+  // While dragging on touch devices, prevent the page from scrolling.
+  window.addEventListener('touchmove', preventTouchScroll, { passive: false })
+
+  window.addEventListener('pointermove', onBlockPointerMove, { passive: false })
+  window.addEventListener('pointerup', onBlockPointerUp, { passive: false })
+  window.addEventListener('pointercancel', onBlockPointerUp, { passive: false })
+}
+
+function onPendingBlockPointerMove(e: PointerEvent) {
+  if (!pendingBlockDrag) return
+  if (e.pointerId !== pendingBlockDrag.pointerId) return
+
+  pendingBlockDrag.lastClientY = e.clientY
+  const dx = e.clientX - pendingBlockDrag.startClientX
+  const dy = e.clientY - pendingBlockDrag.startClientY
+  if (Math.hypot(dx, dy) >= BLOCK_CANCEL_MOVE_PX) {
+    // Finger moved before long-press: treat as a normal scroll gesture.
+    clearPendingBlockDrag()
+  }
+}
+
+function onPendingBlockPointerUp(e: PointerEvent) {
+  if (!pendingBlockDrag) return
+  if (e.pointerId !== pendingBlockDrag.pointerId) return
+  clearPendingBlockDrag()
+}
+
+function onBlockPointerDown(block: Block, e: PointerEvent) {
+  if (!boundsValid.value) return
+  if (showModal.value || showBoundsModal.value) return
+  if (isInteractiveEl(e.target)) return
+  if (e.button !== 0) return
+
+  const el = timelineTrackRef.value
+  if (!el) return
+
+  // Touch: require long-press before enabling drag.
+  if (e.pointerType === 'touch') {
+    // Don't block scrolling here; only take over once drag activates.
+    // We rely on CSS (user-select/touch-callout) + contextmenu.prevent to avoid long-press menus.
+    e.stopPropagation()
+
+    // Don't start another pending drag.
+    clearPendingBlockDrag()
+
+    const startMins = blockStartMinutes(block)
+    const endMins = blockEndMinutes(block)
+    const duration = Math.max(10, endMins - startMins)
+
+    pendingBlockDrag = {
+      blockId: block.id,
+      pointerId: e.pointerId,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      lastClientY: e.clientY,
+      startMinutes: startMins,
+      durationMinutes: duration,
+      captureEl: (e.currentTarget as HTMLElement | null) ?? null,
+    }
+
+    window.addEventListener('pointermove', onPendingBlockPointerMove, { passive: true })
+    window.addEventListener('pointerup', onPendingBlockPointerUp, { passive: true })
+    window.addEventListener('pointercancel', onPendingBlockPointerUp, { passive: true })
+
+    pendingBlockDragTimer = window.setTimeout(() => {
+      if (!pendingBlockDrag) return
+      const s = pendingBlockDrag
+      clearPendingBlockDrag()
+
+      // Start dragging from the current finger Y so the block doesn't jump.
+      beginBlockDrag({
+        blockId: s.blockId,
+        pointerId: s.pointerId,
+        startClientY: s.lastClientY,
+        startMinutes: s.startMinutes,
+        durationMinutes: s.durationMinutes,
+        captureEl: s.captureEl,
+      })
+    }, BLOCK_LONGPRESS_MS)
+
+    return
+  }
+
+  // Mouse/pen: start immediately.
+  e.preventDefault()
+  e.stopPropagation()
+
+  const startMins = blockStartMinutes(block)
+  const endMins = blockEndMinutes(block)
+  const duration = Math.max(10, endMins - startMins)
+
+  beginBlockDrag({
+    blockId: block.id,
+    pointerId: e.pointerId,
+    startClientY: e.clientY,
+    startMinutes: startMins,
+    durationMinutes: duration,
+    captureEl: (e.currentTarget as HTMLElement | null) ?? null,
+  })
+}
+
+function onBlockPointerMove(e: PointerEvent) {
+  if (!blockDrag) return
+  if (e.pointerId !== blockDrag.pointerId) return
+  if (!boundsValid.value) return
+
+  e.preventDefault()
+
+  const dy = e.clientY - blockDrag.startClientY
+  if (!blockDrag.moved && Math.abs(dy) >= 3) blockDrag.moved = true
+
+  const start = wakeMinutes.value as number
+  const end = sleepMinutes.value as number
+  const range = minutesRange.value
+  if (range <= 0 || timelineHeightPx.value <= 0) return
+
+  const deltaMinutes = (dy / timelineHeightPx.value) * range
+  const raw = blockDrag.startMinutes + deltaMinutes
+  const maxStart = end - blockDrag.durationMinutes
+  const clamped = clamp(raw, start, maxStart)
+  const rounded = roundTo5(clamped)
+
+  draggingStartMinutes.value = rounded
+  draggingTopPx.value = markerForMinutes(rounded)
+}
+
+async function onBlockPointerUp(e: PointerEvent) {
+  if (!blockDrag) return
+  if (e.pointerId !== blockDrag.pointerId) return
+
+  e.preventDefault()
+
+  const state = blockDrag
+  blockDrag = null
+
+  window.removeEventListener('pointermove', onBlockPointerMove)
+  window.removeEventListener('pointerup', onBlockPointerUp)
+  window.removeEventListener('pointercancel', onBlockPointerUp)
+  window.removeEventListener('touchmove', preventTouchScroll)
+
+  const moved = state.moved
+  const blockId = state.blockId
+  const newStart = draggingStartMinutes.value
+
+  isDraggingBlock.value = false
+  draggingBlockId.value = null
+  draggingTopPx.value = null
+  draggingStartMinutes.value = null
+
+  if (!moved || newStart == null) return
+
+  const block = blocksStore.items.find((b) => b.id === blockId)
+  if (!block) return
+
+  const payload: Partial<Block> = {
+    start_date: utcIsoForSelectedDayMinutes(newStart),
+  }
+  if (block.end_date) {
+    payload.end_date = utcIsoForSelectedDayMinutes(newStart + state.durationMinutes)
+  }
+
+  try {
+    await blocksStore.update(blockId, payload)
+  } catch (error) {
+    console.error('Failed to move block:', error)
+    alert('Failed to move block')
+  }
+}
+
+async function createBlockFromTaskDrop(taskId: number, clientY: number) {
+  if (!boundsValid.value) {
+    showBoundsModal.value = true
+    return
+  }
+  const el = timelineTrackRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  const y = clientY - rect.top
+  const ratio = Math.max(0, Math.min(1, y / rect.height))
+  const mins = (wakeMinutes.value as number) + ratio * minutesRange.value
+  const rounded = Math.round(mins / 5) * 5
+
+  // Convert minutes + selected day to a UTC start_date for API.
+  const { y: yy, m, d } = parseSelectedYmd(selectedDate.value)
+  const hm = minutesToHm(rounded)
+  const [hs, ms] = hm.split(':')
+  const date = new Date(yy, m - 1, d, Number(hs), Number(ms), 0)
+  const startLocal = toLocalDateTimeInputValue(date)
+  const startUtcIso = toUtcISOStringFromLocalInput(startLocal)
+
+  try {
+    await blocksStore.create({ task: taskId, start_date: startUtcIso } as Partial<Block>)
+  } catch (error) {
+    console.error('Failed to create block from drop:', error)
+    alert('Failed to create block')
+  }
 }
 
 const cancelForm = () => {
@@ -343,109 +704,149 @@ onMounted(() => {
   tasksStore.fetchAll()
   blocksStore.fetchAll()
 })
+
+onBeforeUnmount(() => {
+  clearPendingBlockDrag()
+  window.removeEventListener('pointermove', onBlockPointerMove)
+  window.removeEventListener('pointerup', onBlockPointerUp)
+  window.removeEventListener('pointercancel', onBlockPointerUp)
+  window.removeEventListener('touchmove', preventTouchScroll)
+})
 </script>
 
 <template>
-  <div class="timeline-container">
-    <!-- Day selection slider -->
-    <div class="day-slider">
-      <el-button circle @click="changeDay(-1)" aria-label="Previous day" title="Previous day">
-        <ChevronLeft :size="18" />
-      </el-button>
-
-      <div class="day-current">
-        <el-date-picker
-          v-model="selectedDate"
-          type="date"
-          value-format="YYYY-MM-DD"
-          placeholder="Select day"
+  <div
+    class="timeline-container"
+    :class="{ 'swipe-flash-prev': swipeIndicator === 'prev', 'swipe-flash-next': swipeIndicator === 'next' }"
+    @touchstart.passive="onTouchStart"
+    @touchend.passive="onTouchEnd"
+  >
+    <div class="timeline-layout">
+      <div class="today-pane">
+        <TaskColumn
+          title="Today"
+          status="today"
+          :tasks="todayTasks"
+          default-color="#fee2e2"
+          :sortable="false"
+          external-drop-selector="[data-timeline-drop]"
+          @remove="tasksStore.remove($event)"
+          @external-drop="createBlockFromTaskDrop($event.taskId, $event.clientY)"
         />
       </div>
 
-      <el-button circle @click="changeDay(1)" aria-label="Next day" title="Next day">
-        <ChevronRight :size="18" />
-      </el-button>
-    </div>
+      <div class="timeline-pane">
+        <div class="timeline-inner">
+          <div v-if="swipeIndicator" class="swipe-indicator" :class="swipeIndicator">
+            <ChevronLeft v-if="swipeIndicator === 'prev'" :size="18" />
+            <ChevronRight v-else :size="18" />
+            <span>{{ swipeIndicator === 'prev' ? 'Previous day' : 'Next day' }}</span>
+          </div>
 
-    <div class="header">
-      <h2>Time Blocks</h2>
-    </div>
+          <!-- Day selection slider -->
+          <div class="day-slider">
+            <el-button circle @click="changeDay(-1)" aria-label="Previous day" title="Previous day">
+              <ChevronLeft :size="18" />
+            </el-button>
 
-    <!-- Task + time modal (create/edit) -->
-    <el-dialog
-      v-model="showModal"
-      :title="editingBlockId ? 'Edit Block' : 'New Block'"
-      width="520px"
-      @close="cancelForm"
-    >
-      <el-form label-position="top">
-        <el-form-item label="Task *">
-          <el-select v-model="selectedTaskId" placeholder="Select a task" filterable clearable>
-            <el-option v-for="task in tasksStore.items" :key="task.id" :label="task.title" :value="task.id" />
-          </el-select>
-        </el-form-item>
+            <div class="day-current">
+              <el-date-picker
+                v-model="selectedDate"
+                type="date"
+                value-format="YYYY-MM-DD"
+                placeholder="Select day"
+              />
+            </div>
 
-        <el-form-item label="Start Time *">
-          <el-date-picker
-            v-model="startDate"
-            type="datetime"
-            value-format="YYYY-MM-DDTHH:mm"
-            placeholder="Select start time"
-          />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="cancelForm">Cancel</el-button>
-        <el-button type="primary" @click="submitBlock">{{ editingBlockId ? 'Save' : 'Create' }}</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- Bounds modal (set/edit wake/sleep) -->
-    <el-dialog v-model="showBoundsModal" title="Day Bounds" width="520px" @close="cancelBounds">
-      <el-form label-position="top">
-        <el-row :gutter="12">
-          <el-col :xs="24" :sm="12">
-            <el-form-item label="Wake *">
-              <el-time-select v-model="wakeTime" start="00:00" step="00:05" end="23:55" />
+            <el-button circle @click="changeDay(1)" aria-label="Next day" title="Next day">
+              <ChevronRight :size="18" />
+            </el-button>
+          </div>
+        <el-dialog
+          v-model="showModal"
+          :title="editingBlockId ? 'Edit Block' : 'New Block'"
+          width="520px"
+          @close="cancelForm"
+        >
+          <el-form label-position="top">
+            <el-form-item label="Task *">
+              <el-select v-model="selectedTaskId" placeholder="Select a task" filterable clearable>
+                <el-option
+                  v-for="task in tasksStore.items"
+                  :key="task.id"
+                  :label="task.title"
+                  :value="task.id"
+                />
+              </el-select>
             </el-form-item>
-          </el-col>
-          <el-col :xs="24" :sm="12">
-            <el-form-item label="Sleep *">
-              <el-time-select v-model="sleepTime" start="00:00" step="00:05" end="23:55" />
+
+            <el-form-item label="Start Time *">
+              <el-date-picker
+                v-model="startDate"
+                type="datetime"
+                value-format="YYYY-MM-DDTHH:mm"
+                placeholder="Select start time"
+              />
             </el-form-item>
-          </el-col>
-        </el-row>
+          </el-form>
 
-        <el-alert v-if="hasBounds && !boundsValid" title="Sleep must be after wake." type="error" show-icon />
-      </el-form>
+          <template #footer>
+            <el-button @click="cancelForm">Cancel</el-button>
+            <el-button type="primary" @click="submitBlock">{{ editingBlockId ? 'Save' : 'Create' }}</el-button>
+          </template>
+        </el-dialog>
 
-      <template #footer>
-        <el-button @click="cancelBounds">Cancel</el-button>
-        <el-button type="primary" @click="saveBounds">Save</el-button>
-      </template>
-    </el-dialog>
+        <!-- Bounds modal (set/edit wake/sleep) -->
+        <el-dialog v-model="showBoundsModal" title="Day Bounds" width="520px" @close="cancelBounds">
+          <el-form label-position="top">
+            <el-row :gutter="12">
+              <el-col :xs="24" :sm="12">
+                <el-form-item label="Wake *">
+                  <el-time-select v-model="wakeTime" start="00:00" step="00:05" end="23:55" />
+                </el-form-item>
+              </el-col>
+              <el-col :xs="24" :sm="12">
+                <el-form-item label="Sleep *">
+                  <el-time-select v-model="sleepTime" start="00:00" step="00:05" end="23:55" />
+                </el-form-item>
+              </el-col>
+            </el-row>
 
-    <!-- Loading State -->
-    <div v-if="blocksStore.loading" class="loading">Loading blocks...</div>
+            <el-alert v-if="hasBounds && !boundsValid" title="Sleep must be after wake." type="error" show-icon />
+          </el-form>
 
-    <!-- Error State -->
-    <div v-else-if="blocksStore.error" class="error">
-      {{ blocksStore.error }}
-    </div>
+          <template #footer>
+            <el-button @click="cancelBounds">Cancel</el-button>
+            <el-button type="primary" @click="saveBounds">Save</el-button>
+          </template>
+        </el-dialog>
 
-    <!-- Day Timeline (true scale) -->
-    <div v-else class="day-timeline">
-      <div v-if="!boundsValid" class="empty-state">
-        <p>Set wake and sleep times to view the day timeline.</p>
-        <el-button type="primary" @click="openBoundsEditor" aria-label="Set day bounds" title="Set day bounds">
-          <Clock :size="18" />
-          <span style="margin-left: 6px">Set day bounds</span>
-        </el-button>
-      </div>
+          <!-- Loading State -->
+          <div v-if="blocksStore.loading" class="loading">Loading blocks...</div>
 
-      <div v-else class="mainline-wrap">
-        <div class="mainline" :style="{ height: timelineHeightPx + 'px' }" ref="timelineTrackRef" @click="onTimelineClick">
+          <!-- Error State -->
+          <div v-else-if="blocksStore.error" class="error">
+            {{ blocksStore.error }}
+          </div>
+
+          <!-- Day Timeline (true scale) -->
+          <div v-else class="day-timeline">
+            <div v-if="!boundsValid" class="empty-state">
+              <p>Set wake and sleep times to view the day timeline.</p>
+              <el-button type="primary" @click="openBoundsEditor" aria-label="Set day bounds" title="Set day bounds">
+                <Clock :size="18" />
+                <span style="margin-left: 6px">Set day bounds</span>
+              </el-button>
+            </div>
+
+            <div v-else class="mainline-wrap">
+              <div
+                class="mainline"
+                data-timeline-drop
+                :style="{ height: timelineHeightPx + 'px' }"
+                ref="timelineTrackRef"
+                @click="onTimelineClick"
+              >
           <!-- center line -->
           <div class="line"></div>
 
@@ -483,7 +884,17 @@ onMounted(() => {
             v-for="block in blocksSorted"
             :key="block.id"
             class="block-item"
-            :style="{ top: blockTopPx(block) + 'px', height: blockHeightPx(block) + 'px', ...blockStyleVars(block) }"
+            :class="{ dragging: draggingBlockId === block.id }"
+            :style="{
+              top:
+                draggingBlockId === block.id && draggingTopPx != null
+                  ? draggingTopPx + 'px'
+                  : blockTopPx(block) + 'px',
+              height: blockHeightPx(block) + 'px',
+              ...blockStyleVars(block),
+            }"
+            @pointerdown="onBlockPointerDown(block, $event)"
+            @contextmenu.prevent
             @click.stop
           >
             <div class="block-core">
@@ -532,6 +943,9 @@ onMounted(() => {
               <div class="bubble-sub">{{ sleepTime }}</div>
             </div>
           </div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -540,9 +954,149 @@ onMounted(() => {
 
 <style scoped>
 .timeline-container {
-  max-width: 760px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 20px;
+  padding: clamp(12px, 2.5vw, 20px);
+  position: relative;
+}
+
+.timeline-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.today-pane {
+  --column-list-max-height: min(42vh, 360px);
+}
+
+.timeline-pane {
+  min-width: 0;
+}
+
+.timeline-inner {
+  width: 100%;
+  max-width: 760px;
+  position: relative;
+}
+
+@media (min-width: 900px) {
+  /* Full-width on desktop so the timeline can truly sit centered in the viewport,
+     while Today stays at the far left. */
+  .timeline-container {
+    max-width: none;
+    margin: 0;
+  }
+
+  .timeline-layout {
+    display: grid;
+    grid-template-columns: 320px minmax(0, 760px) 1fr;
+    align-items: start;
+    column-gap: 16px;
+  }
+
+  .today-pane {
+    grid-column: 1;
+  }
+
+  .timeline-pane {
+    grid-column: 2;
+  }
+}
+
+.block-item {
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.block-item.dragging {
+  cursor: grabbing;
+  z-index: 6;
+  touch-action: none;
+}
+
+.swipe-indicator {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 999px;
+  background: rgba(17, 24, 39, 0.78);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+  backdrop-filter: blur(6px);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
+  animation: swipe-pill 450ms ease both;
+  max-width: calc(100% - 24px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.swipe-indicator.prev {
+  left: 10px;
+  transform: translateY(-50%);
+}
+
+.swipe-indicator.next {
+  right: 10px;
+  transform: translateY(-50%);
+}
+
+.timeline-container.swipe-flash-prev::before,
+.timeline-container.swipe-flash-next::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
+  border-radius: 12px;
+  animation: swipe-flash 450ms ease both;
+}
+
+.timeline-container.swipe-flash-prev::before {
+  background: linear-gradient(90deg, rgba(37, 99, 235, 0.16), transparent 42%);
+}
+
+.timeline-container.swipe-flash-next::before {
+  background: linear-gradient(270deg, rgba(37, 99, 235, 0.16), transparent 42%);
+}
+
+@keyframes swipe-pill {
+  0% {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.98);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(-50%) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-50%) scale(0.98);
+  }
+}
+
+@keyframes swipe-flash {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 
 /* Day slider */
@@ -729,6 +1283,8 @@ onMounted(() => {
   background: white;
   max-width: 620px;
   margin: 0 auto;
+  width: 100%;
+  overflow-x: hidden;
 }
 
 .mainline {
@@ -760,6 +1316,10 @@ onMounted(() => {
   left: 0;
   font-size: 12px;
   color: #868e96;
+  max-width: calc(var(--line-x) - 10px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tick-mark {
@@ -813,6 +1373,7 @@ onMounted(() => {
   flex: 1 1 auto;
   overflow-wrap: anywhere;
   max-width: 200px;
+  min-width: 0;
 }
 
 /* Duration-aware blocks */
@@ -901,6 +1462,14 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
+}
+
+.bubble-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .bubble-sub {
@@ -917,6 +1486,7 @@ onMounted(() => {
 
 .bubble-actions.inline {
   margin-top: 0;
+  flex: 0 0 auto;
 }
 
 .mini {
@@ -954,7 +1524,10 @@ onMounted(() => {
 
   .mainline-wrap {
     padding: 12px;
+    max-width: none;
   }
+
+ 
 
   :deep(.el-dialog) {
     max-width: calc(100vw - 24px);
@@ -971,12 +1544,10 @@ onMounted(() => {
     align-items: stretch;
   }
 
-  .marker {
-    width: calc(100% - 12px);
-  }
-
+  /* Keep blocks inside the available width (account for left gutter). */
+ .marker,
   .block-item {
-    width: calc(100% - 12px);
+    width: calc(100% - var(--line-x) - 8px);
   }
 
   .bubble {

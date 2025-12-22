@@ -104,6 +104,21 @@ async function onSubmit() {
   gap: 12px;
 }
 
+@media (max-width: 420px) {
+  .auth-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .auth-actions :deep(.el-button) {
+    width: 100%;
+  }
+
+  .auth-link {
+    text-align: center;
+  }
+}
+
 .auth-link {
   text-decoration: none;
   font-size: 14px;
