@@ -694,8 +694,41 @@ const formatTimeRange = (block: Block) => {
   return `${start}–${end}`
 }
 
+// --- Current time indicator (only for today) ---
+const now = ref(new Date())
+let nowTimer: number | null = null
+
+function updateNow() {
+  now.value = new Date()
+}
+
+const todayYmd = computed(() => {
+  const d = now.value
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+})
+
+const showNowIndicator = computed(() => boundsValid.value && selectedDate.value === todayYmd.value)
+
+const nowMinutes = computed(() => now.value.getHours() * 60 + now.value.getMinutes())
+const nowTopPx = computed(() => (showNowIndicator.value ? markerForMinutes(nowMinutes.value) : 0))
+const nowLabel = computed(() => `${pad(now.value.getHours())}:${pad(now.value.getMinutes())}`)
+
+const nowMarkerVariant = computed(() => {
+  if (!showNowIndicator.value) return 'mid' as const
+  const px = nowTopPx.value
+  const h = timelineHeightPx.value
+  if (px <= 6) return 'top' as const
+  if (px >= h - 6) return 'bottom' as const
+  return 'mid' as const
+})
+
 onMounted(() => {
   initializeDate()
+  updateNow()
+  if (nowTimer == null) {
+    // Update at a low cadence; minute precision is enough.
+    nowTimer = window.setInterval(updateNow, 30_000)
+  }
   const existing = dayBoundsStore.get()
   if (existing) {
     wakeTime.value = existing.wake
@@ -707,6 +740,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearPendingBlockDrag()
+  if (nowTimer != null) {
+    window.clearInterval(nowTimer)
+    nowTimer = null
+  }
   window.removeEventListener('pointermove', onBlockPointerMove)
   window.removeEventListener('pointerup', onBlockPointerUp)
   window.removeEventListener('pointercancel', onBlockPointerUp)
@@ -847,8 +884,22 @@ onBeforeUnmount(() => {
                 ref="timelineTrackRef"
                 @click="onTimelineClick"
               >
-          <!-- center line -->
-          <div class="line"></div>
+          <!-- time axis: single thick empty track + filled portion (today only) -->
+          <div class="axis-track" aria-hidden="true">
+            <div v-if="showNowIndicator" class="axis-fill" :style="{ height: nowTopPx + 'px' }"></div>
+          </div>
+          <div
+            v-if="showNowIndicator"
+            class="now-marker"
+            :class="`now-marker--${nowMarkerVariant}`"
+            :style="{ top: nowTopPx + 'px' }"
+            aria-hidden="true"
+          >
+            <div class="now-dot"></div>
+            <div class="now-label">{{ nowLabel }}</div>
+          </div>
+
+          <!-- axis line replaced by .axis-track -->
 
           <!-- hour ticks -->
           <div v-for="t in hourTicks" :key="t.label" class="tick" :style="{ top: t.top + 'px' }">
@@ -900,7 +951,7 @@ onBeforeUnmount(() => {
             <div class="block-core">
               <div class="block-pill" />
             </div>
-            <div class="bubble" :style="{ borderColor: 'var(--task-color)' }">
+            <div class="bubble bubble-block" :style="{ borderColor: 'var(--task-color)' }">
               <div class="bubble-title-row">
                 <div class="bubble-title">{{ getTaskTitle(block.task) }}</div>
                 <div class="bubble-actions inline">
@@ -1292,15 +1343,68 @@ onBeforeUnmount(() => {
   width: 100%;
   cursor: pointer;
   --line-x: 44px;
+  --axis-w: 10px;
 }
 
-.line {
+.axis-track {
   position: absolute;
-  left: var(--line-x);
+  left: calc(var(--line-x) - (var(--axis-w) / 2));
   top: 0;
   bottom: 0;
-  width: 2px;
-  background: #dee2e6;
+  width: var(--axis-w);
+  border-radius: 999px;
+  background: #e9ecef;
+  overflow: hidden;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.axis-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  background: #4a90e2;
+  border-radius: 999px;
+}
+
+.now-marker {
+  position: absolute;
+  left: var(--line-x);
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.now-marker--top {
+  transform: translateY(0);
+}
+
+.now-marker--bottom {
+  transform: translateY(-100%);
+}
+
+.now-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #4a90e2;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px #dee2e6;
+  margin-left: -5px;
+}
+
+.now-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #4a90e2;
+  background: #fff;
+  padding: 2px 8px;
+  border-radius: 999px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
 }
 
 .tick {
@@ -1329,6 +1433,7 @@ onBeforeUnmount(() => {
   height: 1px;
   transform: translateX(-50%);
   background: #e9ecef;
+  display: none;
 }
 
 .marker {
@@ -1362,7 +1467,13 @@ onBeforeUnmount(() => {
 }
 
 .dot-system {
-  background: #868e96;
+  width: 28px;
+  height: 3px;
+  border-radius: 9999px;
+  background: #ec4899;
+  border: none;
+  box-shadow: none;
+  margin-left: -14px;
 }
 
 .bubble {
@@ -1372,8 +1483,14 @@ onBeforeUnmount(() => {
   padding: 10px 12px;
   flex: 1 1 auto;
   overflow-wrap: anywhere;
-  max-width: 200px;
+  max-width: 100%;
   min-width: 0;
+}
+
+/* Timeline blocks should be "empty" outlines (colored border, no fill). */
+.bubble.bubble-block {
+  background: #fff;
+  width: 100%;
 }
 
 /* Duration-aware blocks */
@@ -1384,11 +1501,14 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: min(520px, calc(100% - var(--line-x) - 8px));
+  width: calc(100% - var(--line-x) - 8px);
+  z-index: 2;
 }
 
 .block-core {
   width: 22px;
+  position: relative;
+  z-index: 4;
   display: flex;
   justify-content: center;
   align-items: stretch;
@@ -1401,9 +1521,11 @@ onBeforeUnmount(() => {
   width: 14px;
   height: 100%;
   border-radius: 9999px;
-  background: var(--task-color);
-  border: 3px solid white;
-  box-shadow: 0 0 0 1px #dee2e6;
+  background: #fff;
+  border: 2px solid var(--task-color);
+  box-shadow: none;
+  position: relative;
+  z-index: 4;
 }
 .modal-overlay {
   position: fixed;
