@@ -171,7 +171,7 @@ const options = computed<ApexOptions>(() => ({
       colorScale: {
         ranges: [
           { from: 0, to: 0, name: 'None', color: '#f2f2f2' },
-          { from: 1, to: 10, name: 'Abandoned', color: '#e66666' },
+          { from: 1, to: 10, name: 'Low', color: '#e66666' },
           { from: 10, to: 30, name: 'Medium', color: '#A5D6A7' },
           { from: 30, to: 180, name: 'High', color: '#66BB6A' },
           { from: 180, to: 600, name: 'Intense', color: '#2E7D32' },

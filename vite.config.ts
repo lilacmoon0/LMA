@@ -13,7 +13,7 @@ export default defineConfig({
     VitePWA({
       injectRegister: 'auto',
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'pwa-icon.svg', 'pwa-maskable.svg'],
+      includeAssets: ['favicon.ico', 'mascot.png', 'mascot.png'],
       manifest: {
         name: 'Life Management App',
         short_name: 'LMA',
@@ -25,12 +25,12 @@ export default defineConfig({
         background_color: '#ffffff',
         icons: [
           {
-            src: '/pwa-icon.svg',
+            src: '/mascot-pwa.png',
             sizes: 'any',
             type: 'image/svg+xml',
           },
           {
-            src: '/pwa-maskable.svg',
+            src: '/mascot-pwa.png',
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'maskable',

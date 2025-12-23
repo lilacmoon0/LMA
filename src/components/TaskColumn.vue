@@ -2,7 +2,7 @@
 import type { Task, TaskStatus } from '../types'
 import TaskCard from './TaskCard.vue'
 import { useTasksStore } from '../stores/tasks'
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import { useColumnsStore } from '../stores/columns'
 import { MoreVertical, RotateCcw, X, Plus } from 'lucide-vue-next'
 import Draggable from 'vuedraggable'
@@ -32,6 +32,10 @@ const emit = defineEmits<{
 
 const tasksStore = useTasksStore()
 const columnsStore = useColumnsStore()
+
+onMounted(() => {
+  columnsStore.registerDefaultColor(props.status, props.defaultColor || '')
+})
 
 const menuOpen = ref(false)
 const addOpen = ref(false)

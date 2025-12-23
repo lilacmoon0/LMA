@@ -2,11 +2,16 @@
 import { onMounted } from 'vue'
 import TaskColumn from './TaskColumn.vue'
 import { useTasksStore } from '../stores/tasks'
+import { useFocusStore } from '../stores/focusSessions'
+import { useAuthStore } from '../stores/auth'
 
 const tasksStore = useTasksStore()
+const focusStore = useFocusStore()
+const authStore = useAuthStore()
 
 onMounted(() => {
   if (!tasksStore.items.length) tasksStore.fetchAll()
+  if (authStore.isAuthenticated && !focusStore.sessions.length) focusStore.fetchAll()
 })
 </script>
 

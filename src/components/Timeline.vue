@@ -4,7 +4,10 @@ import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useBlocksStore } from '../stores/blocks'
 import { useTasksStore } from '../stores/tasks'
 import { useDayBoundsStore } from '../stores/dayBounds'
+import type { DayBounds } from '../stores/dayBounds'
+import { useAuthStore } from '../stores/auth'
 import { useFocusStore } from '../stores/focusSessions'
+import { getSetting, updateSetting } from '../api/setting'
 import type { Block } from '../types'
 import TaskColumn from './TaskColumn.vue'
 import {
@@ -21,6 +24,7 @@ import {
 const blocksStore = useBlocksStore()
 const tasksStore = useTasksStore()
 const dayBoundsStore = useDayBoundsStore()
+const authStore = useAuthStore()
 const focusStore = useFocusStore()
 
 const todayTasks = tasksStore.byStatus('today')
@@ -83,6 +87,14 @@ const toUtcISOStringFromLocalInput = (value: string) => {
   return localDate.toISOString()
 }
 
+function addMinutesToUtcIso(utcIso: string, minutes: number) {
+  const base = new Date(utcIso).getTime()
+  if (!Number.isFinite(base)) return utcIso
+  const mins = Number(minutes)
+  if (!Number.isFinite(mins)) return utcIso
+  return new Date(base + mins * 60_000).toISOString()
+}
+
 const parseHm = (hm: string) => {
   const [hs, ms] = String(hm || '').split(':')
   const h = Number(hs)
@@ -106,7 +118,28 @@ function utcIsoForSelectedDayMinutes(minutesFromMidnight: number) {
   return toUtcISOStringFromLocalInput(startLocal)
 }
 
-const saveBounds = () => {
+function asDayBounds(value: unknown): DayBounds | null {
+  if (!value || typeof value !== 'object') return null
+  const v = value as Record<string, unknown>
+  if (typeof v.wake === 'string' && typeof v.sleep === 'string') {
+    return { wake: v.wake, sleep: v.sleep }
+  }
+  return null
+}
+
+function parseDayBoundsFromSetting(dayBoundsValue: unknown): DayBounds | null {
+  // Accept either a single object or a list containing a bounds object.
+  const direct = asDayBounds(dayBoundsValue)
+  if (direct) return direct
+
+  if (Array.isArray(dayBoundsValue) && dayBoundsValue.length > 0) {
+    return asDayBounds(dayBoundsValue[0])
+  }
+
+  return null
+}
+
+const saveBounds = async () => {
   const wake = parseHm(wakeTime.value)
   const sleep = parseHm(sleepTime.value)
   if (wake === null || sleep === null) {
@@ -117,9 +150,54 @@ const saveBounds = () => {
     alert('Sleep time must be after wake time.')
     return
   }
-  dayBoundsStore.set({ wake: wakeTime.value, sleep: sleepTime.value })
+
+  const next = { wake: wakeTime.value, sleep: sleepTime.value }
+  dayBoundsStore.set(next)
+
+  if (authStore.isAuthenticated) {
+    try {
+      await updateSetting({ day_bounds: [next] })
+    } catch (error) {
+      console.error('Failed to save day bounds to setting endpoint:', error)
+      alert('Failed to sync day bounds to your account. Please try again.')
+    }
+  }
   showBoundsModal.value = false
 }
+
+const didFetchSetting = ref(false)
+
+async function hydrateDayBoundsFromApiSetting() {
+  if (!authStore.isAuthenticated) return
+
+  try {
+    const setting = await getSetting()
+    const fromApi = parseDayBoundsFromSetting(setting?.day_bounds)
+    if (fromApi) {
+      dayBoundsStore.set(fromApi)
+      wakeTime.value = fromApi.wake
+      sleepTime.value = fromApi.sleep
+      return
+    }
+
+    // No bounds stored server-side yet: ask the user to set day bounds.
+    showBoundsModal.value = true
+  } catch (error) {
+    console.error('Failed to load setting from API:', error)
+    // Keep running; the user can still set bounds via the modal.
+  }
+}
+
+watch(
+  () => authStore.isAuthenticated,
+  (authed) => {
+    if (!authed) return
+    if (didFetchSetting.value) return
+    didFetchSetting.value = true
+    void hydrateDayBoundsFromApiSetting()
+  },
+  { immediate: true },
+)
 
 // Initialize selected day + start datetime
 const initializeDate = () => {
@@ -150,10 +228,27 @@ const submitBlock = async () => {
   }
 
   try {
+    const est = taskEstimatedMinutes(selectedTaskId.value)
     const payload = {
       task: selectedTaskId.value,
       start_date: toUtcISOStringFromLocalInput(startDate.value),
     } as Partial<Block>
+
+    // Always submit end_date if the task has an estimate.
+    if (est != null) {
+      payload.end_date = addMinutesToUtcIso(payload.start_date as string, est)
+    } else if (editingBlockId.value !== null) {
+      // Otherwise, preserve the existing end_date duration (if any) when changing start.
+      const existing = blocksStore.items.find((b) => b.id === editingBlockId.value)
+      if (existing?.end_date) {
+        const startMs = new Date(existing.start_date).getTime()
+        const endMs = new Date(existing.end_date).getTime()
+        if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+          const durMin = Math.round((endMs - startMs) / 60_000)
+          payload.end_date = addMinutesToUtcIso(payload.start_date as string, durMin)
+        }
+      }
+    }
 
     if (editingBlockId.value !== null) {
       await blocksStore.update(editingBlockId.value, payload)
@@ -178,6 +273,15 @@ const editBlock = (block: Block) => {
 const deleteBlock = async (id: number) => {
   if (confirm('Are you sure you want to delete this block?')) {
     try {
+      const block = blocksStore.items.find((b) => b.id === id)
+      if (block) {
+        const active = activeFocusForTask(block.task)
+        if (active) {
+          // If the focused task's block is deleted, end the session (treat as not successful).
+          await focusStore.stop(active.id, false)
+        }
+        focusStore.clearPause()
+      }
       await blocksStore.remove(id)
     } catch (error) {
       console.error('Failed to delete block:', error)
@@ -258,12 +362,17 @@ const blockStartMinutes = (block: Block) => {
 }
 
 const blockEndMinutes = (block: Block) => {
-  const fallback = blockStartMinutes(block) + 30
-  if (!block.end_date) return fallback
-  const d = new Date(block.end_date)
-  const mins = d.getHours() * 60 + d.getMinutes()
-  // Guard against bad data (or missing end) that would yield 0/negative durations
-  return mins > blockStartMinutes(block) ? mins : fallback
+  const start = blockStartMinutes(block)
+  const fallback = start + 30
+
+  if (block.end_date) {
+    const d = new Date(block.end_date)
+    const mins = d.getHours() * 60 + d.getMinutes()
+    // Guard against bad data (or missing end) that would yield 0/negative durations
+    if (mins > start) return mins
+  }
+
+  return fallback
 }
 
 const blockTopPx = (block: Block) => markerForMinutes(blockStartMinutes(block))
@@ -519,7 +628,8 @@ function onBlockPointerDown(block: Block, e: PointerEvent) {
 
     const startMins = blockStartMinutes(block)
     const endMins = blockEndMinutes(block)
-    const duration = Math.max(10, endMins - startMins)
+    const est = taskEstimatedMinutes(block.task)
+    const duration = Math.max(10, block.end_date ? endMins - startMins : (est ?? (endMins - startMins)))
 
     pendingBlockDrag = {
       blockId: block.id,
@@ -561,7 +671,8 @@ function onBlockPointerDown(block: Block, e: PointerEvent) {
 
   const startMins = blockStartMinutes(block)
   const endMins = blockEndMinutes(block)
-  const duration = Math.max(10, endMins - startMins)
+  const est = taskEstimatedMinutes(block.task)
+  const duration = Math.max(10, block.end_date ? endMins - startMins : (est ?? (endMins - startMins)))
 
   beginBlockDrag({
     blockId: block.id,
@@ -629,8 +740,20 @@ async function onBlockPointerUp(e: PointerEvent) {
   const payload: Partial<Block> = {
     start_date: utcIsoForSelectedDayMinutes(newStart),
   }
+
+  // Keep end_date in sync with the move.
+  // If the block already has an end_date, shift it by the same delta minutes as start_date.
+  // If it does not have an end_date yet, derive it from the task estimate (if any).
   if (block.end_date) {
-    payload.end_date = utcIsoForSelectedDayMinutes(newStart + state.durationMinutes)
+    const oldStart = blockStartMinutes(block)
+    const oldEnd = blockEndMinutes(block)
+    const deltaMin = newStart - oldStart
+    payload.end_date = utcIsoForSelectedDayMinutes(oldEnd + deltaMin)
+  } else {
+    const est = taskEstimatedMinutes(block.task)
+    if (est != null) {
+      payload.end_date = utcIsoForSelectedDayMinutes(newStart + est)
+    }
   }
 
   try {
@@ -662,8 +785,15 @@ async function createBlockFromTaskDrop(taskId: number, clientY: number) {
   const startLocal = toLocalDateTimeInputValue(date)
   const startUtcIso = toUtcISOStringFromLocalInput(startLocal)
 
+  const est = taskEstimatedMinutes(taskId)
+  const endUtcIso = est != null ? addMinutesToUtcIso(startUtcIso, est) : null
+
   try {
-    await blocksStore.create({ task: taskId, start_date: startUtcIso } as Partial<Block>)
+    await blocksStore.create({
+      task: taskId,
+      start_date: startUtcIso,
+      ...(endUtcIso ? { end_date: endUtcIso } : {}),
+    } as Partial<Block>)
   } catch (error) {
     console.error('Failed to create block from drop:', error)
     alert('Failed to create block')
@@ -695,7 +825,7 @@ const formatTimeOnly = (dateStr: string) => {
 
 const formatTimeRange = (block: Block) => {
   const start = formatTimeOnly(block.start_date)
-  const end = block.end_date ? formatTimeOnly(block.end_date) : minutesToHm(blockStartMinutes(block) + 30)
+  const end = block.end_date ? formatTimeOnly(block.end_date) : minutesToHm(blockEndMinutes(block))
   return `${start}–${end}`
 }
 
@@ -703,11 +833,44 @@ const formatTimeRange = (block: Block) => {
 const focusNowMs = ref(Date.now())
 let focusTicker: number | null = null
 
+const markDoneInFlightByBlockId = ref<Record<number, true>>({})
+
+async function maybeMarkActiveBlockDone() {
+  const taskId = globalActiveTaskId()
+  if (taskId == null) return
+  const blockId = focusStore.activeBlockId
+  if (blockId == null) return
+
+  const block = blocksStore.items.find((b) => b.id === blockId)
+  if (!block) return
+  if (block.done) return
+
+  const est = taskEstimatedMinutes(taskId)
+  if (est == null) return
+  const elapsedMin = effectiveElapsedMsForTask(taskId) / 60000
+  if (elapsedMin < est) return
+
+  if (markDoneInFlightByBlockId.value[blockId]) return
+  markDoneInFlightByBlockId.value = { ...markDoneInFlightByBlockId.value, [blockId]: true }
+  try {
+    await blocksStore.update(blockId, { done: true } as Partial<Block>)
+  } catch (error) {
+    console.error('Failed to mark block done:', error)
+  } finally {
+    if (markDoneInFlightByBlockId.value[blockId]) {
+      const next = { ...markDoneInFlightByBlockId.value }
+      delete next[blockId]
+      markDoneInFlightByBlockId.value = next
+    }
+  }
+}
+
 function startFocusTicker() {
   if (focusTicker != null) return
   focusNowMs.value = Date.now()
   focusTicker = window.setInterval(() => {
     focusNowMs.value = Date.now()
+    void maybeMarkActiveBlockDone()
   }, 1000)
 }
 
@@ -725,58 +888,27 @@ function isFocusingTask(taskId: number) {
   return !!activeFocusForTask(taskId)
 }
 
-type PauseState = {
-  pausedAtMs: number | null
-  pausedTotalMs: number
+function globalActiveTaskId() {
+  const entry = Object.entries(focusStore.activeByTask).find(([, s]) => !!s)
+  return entry ? Number(entry[0]) : null
 }
 
-const pausedByTask = ref<Record<number, PauseState>>({})
-
-function pauseStateForTask(taskId: number): PauseState {
-  const existing = pausedByTask.value[taskId]
-  if (existing) return existing
-  const next: PauseState = { pausedAtMs: null, pausedTotalMs: 0 }
-  pausedByTask.value[taskId] = next
-  return next
+function canStartFocusForTask(taskId: number) {
+  const activeTask = globalActiveTaskId()
+  return activeTask == null || activeTask === taskId
 }
 
-function isPausedTask(taskId: number) {
-  return pauseStateForTask(taskId).pausedAtMs != null
-}
-
-function pauseTask(taskId: number) {
-  if (!activeFocusForTask(taskId)) return
-  const state = pauseStateForTask(taskId)
-  if (state.pausedAtMs != null) return
-  state.pausedAtMs = Date.now()
-}
-
-function resumeTask(taskId: number) {
-  if (!activeFocusForTask(taskId)) return
-  const state = pauseStateForTask(taskId)
-  if (state.pausedAtMs == null) return
-  state.pausedTotalMs += Date.now() - state.pausedAtMs
-  state.pausedAtMs = null
-}
-
-function clearPause(taskId: number) {
-  if (pausedByTask.value[taskId]) delete pausedByTask.value[taskId]
-}
-
-function blockDurationMinutes(block: Block) {
-  return Math.max(10, blockEndMinutes(block) - blockStartMinutes(block))
+function taskEstimatedMinutes(taskId: number) {
+  const task = tasksStore.items.find((t) => t.id === taskId)
+  const est = task?.estimated_minutes
+  if (!Number.isFinite(est as number)) return null
+  const n = Number(est)
+  if (n <= 0) return null
+  return n
 }
 
 function effectiveElapsedMsForTask(taskId: number) {
-  const active = activeFocusForTask(taskId)
-  if (!active) return 0
-  const startedMs = new Date(active.started_at).getTime()
-  const pauseState = pauseStateForTask(taskId)
-  const pausedWindowMs = pauseState.pausedAtMs != null ? focusNowMs.value - pauseState.pausedAtMs : 0
-  return Math.max(
-    0,
-    focusNowMs.value - startedMs - pauseState.pausedTotalMs - Math.max(0, pausedWindowMs),
-  )
+  return focusStore.effectiveElapsedMs(taskId, focusNowMs.value)
 }
 
 function formatTinyTimer(taskId: number) {
@@ -789,22 +921,62 @@ function formatTinyTimer(taskId: number) {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
 }
 
-function focusFillPercentForBlock(block: Block) {
+function completedMinutesForBlock(block: Block) {
+  const entry = focusStore.completedBlocks?.[block.id]
+  if (!entry) return null
+  const minutes = Number(entry.minutes)
+  if (!Number.isFinite(minutes) || minutes < 0) return 0
+  return minutes
+}
+
+function minutesSpentForBlock(block: Block) {
   const active = activeFocusForTask(block.task)
-  if (!active) return 0
-  const elapsedMinutes = effectiveElapsedMsForTask(block.task) / 60000
-  const duration = blockDurationMinutes(block)
-  const pct = (elapsedMinutes / duration) * 100
-  return Math.max(0, Math.min(100, pct))
+  if (active) return effectiveElapsedMsForTask(block.task) / 60000
+  const completed = completedMinutesForBlock(block)
+  if (completed != null) return completed
+  return 0
+}
+
+function blockPlannedDurationMinutes(block: Block) {
+  if (block.end_date) {
+    const startMs = new Date(block.start_date).getTime()
+    const endMs = new Date(block.end_date).getTime()
+    if (Number.isFinite(startMs) && Number.isFinite(endMs) && endMs > startMs) {
+      return Math.max(10, Math.round((endMs - startMs) / 60000))
+    }
+  }
+
+  return 30
+}
+
+function isBlockCompleted(block: Block) {
+  return !!block.done
+}
+
+function fillPercentForBlock(block: Block) {
+  if (block.done) return 100
+  const target = taskEstimatedMinutes(block.task) ?? blockPlannedDurationMinutes(block)
+  if (!Number.isFinite(target) || target <= 0) return 0
+  const pct = (minutesSpentForBlock(block) / target) * 100
+  // Keep <100% unless the backend says it's done.
+  return Math.max(0, Math.min(99.9, pct))
 }
 
 async function onBlockFocusStart(block: Block) {
+  if (!canStartFocusForTask(block.task)) {
+    alert('Finish the current focus (Done) before starting another.')
+    return
+  }
   try {
-    clearPause(block.task)
-    await focusStore.start(block.task)
+    // Ensure we have task estimates before starting focus so fill/height are correct.
+    if (!tasksStore.items.length && !tasksStore.loading) {
+      await tasksStore.fetchAll()
+    }
+    await focusStore.start(block.task, '', block.id)
+    focusStore.clearPause()
   } catch (error) {
     console.error('Failed to start focus:', error)
-    alert('Failed to start focus')
+    alert('Finish the current focus (Done) before starting another.')
   }
 }
 
@@ -812,7 +984,6 @@ async function onBlockFocusDone(block: Block) {
   const active = activeFocusForTask(block.task)
   if (!active) return
   try {
-    clearPause(block.task)
     await focusStore.stop(active.id, true)
   } catch (error) {
     console.error('Failed to stop focus:', error)
@@ -825,17 +996,6 @@ watch(
   (ids) => {
     if (ids && ids !== '0') startFocusTicker()
     else stopFocusTicker()
-
-    // Clean up pause state for tasks that are no longer active.
-    const activeTaskIds = new Set(
-      Object.entries(focusStore.activeByTask)
-        .filter(([, s]) => !!s)
-        .map(([k]) => Number(k)),
-    )
-    for (const key of Object.keys(pausedByTask.value)) {
-      const taskId = Number(key)
-      if (!activeTaskIds.has(taskId)) delete pausedByTask.value[taskId]
-    }
   },
   { immediate: true },
 )
@@ -880,9 +1040,11 @@ onMounted(() => {
     wakeTime.value = existing.wake
     sleepTime.value = existing.sleep
   }
-  tasksStore.fetchAll()
-  blocksStore.fetchAll()
-  focusStore.fetchAll()
+
+  // Fetch in parallel; blocks should render even while tasks are still loading.
+  void tasksStore.fetchAll()
+  void blocksStore.fetchAll()
+  void focusStore.fetchAll()
 })
 
 onBeforeUnmount(() => {
@@ -907,7 +1069,7 @@ onBeforeUnmount(() => {
     @touchend.passive="onTouchEnd"
   >
     <div class="timeline-layout">
-      <div class="today-pane">
+      <div class="today-panel">
         <TaskColumn
           title="Today"
           status="today"
@@ -1097,16 +1259,19 @@ onBeforeUnmount(() => {
             @click.stop
           >
             <div class="block-core">
-              <div class="block-pill" />
-            </div>
-            <div class="bubble bubble-block" :style="{ borderColor: 'var(--task-color)' }">
               <div
-                v-if="isFocusingTask(block.task)"
-                class="focus-fill"
-                :style="{ height: focusFillPercentForBlock(block) + '%' }"
-                aria-hidden="true"
+                class="block-pill"
+                :class="{ 'is-complete': isBlockCompleted(block) }"
               />
-
+            </div>
+            <div
+              class="bubble bubble-block"
+              :class="{ 'is-complete': isBlockCompleted(block) }"
+              :style="{
+                borderColor: 'var(--task-color)',
+                '--focus-fill-pct': fillPercentForBlock(block) + '%',
+              }"
+            >
               <div class="bubble-content">
                 <div class="bubble-title-row">
                   <div class="bubble-title">{{ getTaskTitle(block.task) }}</div>
@@ -1117,11 +1282,11 @@ onBeforeUnmount(() => {
                         circle
                         size="small"
                         class="mini-icon-btn"
-                        :aria-label="isPausedTask(block.task) ? 'Resume focus timer' : 'Stop focus timer temporarily'"
-                        :title="isPausedTask(block.task) ? 'Resume' : 'Stop'"
-                        @click.stop="isPausedTask(block.task) ? resumeTask(block.task) : pauseTask(block.task)"
+                        :aria-label="focusStore.isPaused(block.task) ? 'Resume focus timer' : 'Stop focus timer temporarily'"
+                        :title="focusStore.isPaused(block.task) ? 'Resume' : 'Stop'"
+                        @click.stop="focusStore.isPaused(block.task) ? focusStore.resume(block.task) : focusStore.pause(block.task)"
                       >
-                        <Play v-if="isPausedTask(block.task)" :size="14" />
+                        <Play v-if="focusStore.isPaused(block.task)" :size="14" />
                         <Pause v-else :size="14" />
                       </el-button>
 
@@ -1146,8 +1311,9 @@ onBeforeUnmount(() => {
                         class="mini-icon-btn"
                         type="primary"
                         aria-label="Focus (start timer)"
-                        title="Focus"
+                        :title="canStartFocusForTask(block.task) ? 'Focus' : 'Finish current focus (Done) first'"
                         @click.stop="onBlockFocusStart(block)"
+                        :disabled="!canStartFocusForTask(block.task)"
                       >
                         <Play :size="14" />
                       </el-button>
@@ -1178,6 +1344,7 @@ onBeforeUnmount(() => {
                     </el-button>
                   </div>
                 </div>
+
                 <div class="bubble-sub">{{ formatTimeRange(block) }}</div>
               </div>
 
@@ -1210,6 +1377,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .timeline-container {
+  --timeline-accent: #f36593;
   max-width: 1100px;
   margin: 0 auto;
   padding: clamp(12px, 2.5vw, 20px);
@@ -1222,8 +1390,9 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 
-.today-pane {
+.today-panel {
   --column-list-max-height: min(42vh, 360px);
+  margin-top: 50px;
 }
 
 .timeline-pane {
@@ -1251,7 +1420,7 @@ onBeforeUnmount(() => {
     column-gap: 16px;
   }
 
-  .today-pane {
+  .today-panel {
     grid-column: 1;
   }
 
@@ -1451,8 +1620,8 @@ onBeforeUnmount(() => {
 .form-group textarea:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #4a90e2;
-  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+  border-color: var(--timeline-accent);
+  box-shadow: 0 0 0 3px rgba(243, 101, 147, 0.18);
 }
 
 .form-group textarea {
@@ -1474,7 +1643,7 @@ onBeforeUnmount(() => {
 }
 
 .btn-primary {
-  background: #4a90e2;
+  background: var(--timeline-accent);
   color: white;
   border: none;
   padding: 10px 20px;
@@ -1486,7 +1655,7 @@ onBeforeUnmount(() => {
 }
 
 .btn-primary:hover {
-  background: #357abd;
+  filter: brightness(0.95);
 }
 
 .btn-secondary {
@@ -1569,7 +1738,7 @@ onBeforeUnmount(() => {
   left: 0;
   top: 0;
   width: 100%;
-  background: #4a90e2;
+  background: var(--timeline-accent);
   border-radius: 999px;
 }
 
@@ -1596,7 +1765,7 @@ onBeforeUnmount(() => {
   width: 10px;
   height: 10px;
   border-radius: 999px;
-  background: #4a90e2;
+  background: var(--timeline-accent);
   border: 2px solid #fff;
   box-shadow: 0 0 0 1px #dee2e6;
   margin-left: -5px;
@@ -1605,7 +1774,7 @@ onBeforeUnmount(() => {
 .now-label {
   font-size: 12px;
   font-weight: 700;
-  color: #4a90e2;
+  color: var(--timeline-accent);
   background: #fff;
   padding: 2px 8px;
   border-radius: 999px;
@@ -1664,7 +1833,7 @@ onBeforeUnmount(() => {
   width: 20px;
   height: 12px;
   border-radius: 9999px;
-  background: #4a90e2;
+  background: var(--timeline-accent);
   border: 3px solid white;
   box-shadow: 0 0 0 1px #dee2e6;
   flex: 0 0 auto;
@@ -1672,13 +1841,13 @@ onBeforeUnmount(() => {
 }
 
 .dot-system {
-  width: 28px;
+  width: 25px;
   height: 3px;
   border-radius: 9999px;
-  background: #ec4899;
+  background: #000000;
   border: none;
   box-shadow: none;
-  margin-left: -14px;
+  margin-left: -13px;
 }
 
 .bubble {
@@ -1694,10 +1863,45 @@ onBeforeUnmount(() => {
 
 /* Timeline blocks should be "empty" outlines (colored border, no fill). */
 .bubble.bubble-block {
+  --focus-fill-pct: 0%;
   background: #fff;
   width: 100%;
   position: relative;
   overflow: hidden;
+}
+
+.bubble.bubble-block::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  width: var(--focus-fill-pct);
+  background: var(--task-color);
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.bubble.bubble-block.is-complete::before {
+  width: 100%;
+  opacity: 0.85;
+}
+
+.bubble.bubble-block.is-complete {
+  border-color: var(--task-color);
+}
+
+.bubble.bubble-block.is-complete .bubble-title,
+.bubble.bubble-block.is-complete .bubble-sub,
+.bubble.bubble-block.is-complete .focus-tiny-timer {
+  color: #fff;
+}
+
+.bubble.bubble-block.is-complete .mini-icon-btn {
+  color: #fff;
+}
+
+.block-pill.is-complete {
+  background: var(--task-color);
+  border-color: var(--task-color);
 }
 
 .bubble-content {
@@ -1711,17 +1915,24 @@ onBeforeUnmount(() => {
   padding: 0;
 }
 
-.focus-fill {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 0%;
+.focus-progress {
+  margin-top: 8px;
+}
+
+.focus-progress-track {
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--el-fill-color-light);
+  overflow: hidden;
+}
+
+.focus-progress-fill {
+  height: 100%;
+  width: 0%;
   background: var(--task-color);
-  opacity: 0.14;
-  transition: height 0.35s linear;
-  z-index: 0;
-  pointer-events: none;
+  opacity: 0.6;
+  transition: width 0.35s linear;
 }
 
 .focus-tiny-timer {

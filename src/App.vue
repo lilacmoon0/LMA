@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Menu } from 'lucide-vue-next'
 import { useAuthStore } from './stores/auth'
+import FocusNow from './components/FocusNow.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -27,9 +28,11 @@ async function onLogout() {
 
 <template>
   <el-container class="app-shell">
-    <el-header class="app-header" height="56px">
+    <el-header class="app-header" height="3.5rem">
       <div class="header-inner">
-        <RouterLink class="brand" :to="isAuthed ? '/' : '/login'">LMA</RouterLink>
+        <RouterLink class="brand" :to="isAuthed ? '/' : '/login'">
+          <img class="brand__logo" src="/mascot.png" />
+        </RouterLink>
 
         <el-menu
           v-if="isAuthed"
@@ -58,13 +61,19 @@ async function onLogout() {
       </div>
     </el-header>
 
-    <el-drawer v-model="mobileNavOpen" direction="ltr" size="280px" :with-header="false">
+    <el-drawer
+      v-model="mobileNavOpen"
+      direction="ltr"
+      size="min(90vw, 17.5rem)"
+      :with-header="false"
+    >
       <div class="drawer-inner">
         <RouterLink
           class="brand brand--drawer"
           :to="isAuthed ? '/' : '/login'"
           @click="mobileNavOpen = false"
-        >LMA</RouterLink>
+          ><img class="brand__logo" src="/mascot.png"
+        /></RouterLink>
 
         <el-menu
           v-if="isAuthed"
@@ -74,9 +83,9 @@ async function onLogout() {
           @select="mobileNavOpen = false"
         >
           <el-menu-item index="/">Kanban</el-menu-item>
+          <el-menu-item index="/time">Timeline</el-menu-item>
           <el-menu-item index="/notes">Notes</el-menu-item>
           <el-menu-item index="/focus-log">Focus Log</el-menu-item>
-          <el-menu-item index="/time">Timeline</el-menu-item>
         </el-menu>
 
         <el-button v-if="isAuthed" text @click="onLogout">Logout</el-button>
@@ -93,6 +102,8 @@ async function onLogout() {
         </template>
       </Suspense>
     </el-main>
+
+    <FocusNow />
   </el-container>
 </template>
 
@@ -106,33 +117,28 @@ async function onLogout() {
 }
 
 .header-inner {
-  height: 56px;
+  height: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 0.75rem;
   width: 100%;
   max-width: 1500px;
   margin: 0 auto;
-  padding: 0 clamp(12px, 2vw, 16px);
+  padding: 0 clamp(0.75rem, 2vw, 1rem);
 }
 
 .brand {
-  font-weight: 800;
-  letter-spacing: 0.2px;
-  text-decoration: none;
+  height: 100%;
   display: inline-flex;
   align-items: center;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: 10px;
-  border: 1px solid var(--el-border-color-lighter);
-  background: var(--el-fill-color-light);
-  color: var(--el-text-color-primary);
-  user-select: none;
 }
 
-.brand:hover {
-  background: var(--el-fill-color);
+.brand__logo {
+  height: 100%;
+  width: auto;
+  max-height: 100%;
+  object-fit: contain;
+  flex: 0 0 auto;
 }
 
 .app-menu {
@@ -142,7 +148,7 @@ async function onLogout() {
 }
 
 .app-menu--desktop {
-  height: 56px;
+  height: 100%;
   display: flex;
   align-items: center;
 }
@@ -152,10 +158,10 @@ async function onLogout() {
   border-bottom: none !important;
   display: inline-flex;
   align-items: center;
-  border-radius: 10px;
-  margin: 0 2px;
-  height: 36px;
-  line-height: 36px;
+  border-radius: 0.625rem;
+  margin: 0 0.125rem;
+  height: 2.25rem;
+  line-height: 2.25rem;
 }
 
 .app-menu--desktop:deep(.el-menu-item:hover) {
@@ -174,13 +180,13 @@ async function onLogout() {
 .drawer-inner {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 0.75rem;
 }
 
 .brand--drawer {
   display: inline-flex;
   align-items: center;
-  height: 40px;
+  height: 2.5rem;
   background: transparent;
   border: none;
   padding: 0;
@@ -190,10 +196,10 @@ async function onLogout() {
 .app-main {
   padding: 0;
   overflow-x: hidden;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0rem);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 48rem) {
   .app-menu--desktop {
     display: none;
   }
@@ -204,7 +210,7 @@ async function onLogout() {
   }
 
   .header-inner {
-    gap: 8px;
+    gap: 0.5rem;
   }
 }
 </style>

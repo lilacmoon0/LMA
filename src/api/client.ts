@@ -110,6 +110,9 @@ export const endpoints = {
   daySummaries: '/day-summaries/',
   blocks: '/blocks/',
 
+  setting: '/setting/',
+  notes: '/notes/',
+
   authRegister: '/auth/register/',
   authLogin: '/auth/login/',
   authRefresh: '/auth/refresh/',

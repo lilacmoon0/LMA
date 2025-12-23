@@ -44,5 +44,23 @@ export interface Block {
   title: string
   desc: string
   start_date: string // ISO datetime
-  end_date: string // ISO datetime
+  end_date?: string | null // ISO datetime
+  done?: boolean
+}
+
+export interface Setting {
+  id: number
+  day_bounds: unknown[]
+  column_colors: string[]
+  created_at: string
+  updated_at: string
+}
+
+export interface Note {
+  id: number
+  title: string
+  content: string
+  background_color: string
+  created_at: string
+  updated_at: string
 }

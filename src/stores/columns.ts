@@ -2,48 +2,122 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
 import type { TaskStatus } from '../types'
 
-const STORAGE_KEY = 'lma.columns.colors'
+import { useAuthStore } from './auth'
+import { getSetting, updateSetting } from '../api/setting'
+
+const STATUS_ORDER: TaskStatus[] = ['todo', 'doing', 'today', 'done']
+
+function indexForStatus(status: TaskStatus | string): number {
+  const idx = STATUS_ORDER.indexOf(status as TaskStatus)
+  return idx >= 0 ? idx : -1
+}
+
+function normalizeColorArray(value: unknown): (string | null)[] {
+  // null means "unset" so TaskColumn can fall back to its own default-color prop.
+  if (!Array.isArray(value)) return [null, null, null, null]
+  const out: (string | null)[] = [null, null, null, null]
+  for (let i = 0; i < out.length; i++) {
+    const v = value[i]
+    out[i] = typeof v === 'string' && v.length > 0 ? v : null
+  }
+  return out
+}
 
 export const useColumnsStore = defineStore('columns', () => {
-  // store colors keyed by status
-  const colors = ref<Record<string, string>>({})
+  const authStore = useAuthStore()
 
-  // load from localStorage if present
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) {
-      const parsed = JSON.parse(raw)
-      if (parsed && typeof parsed === 'object') colors.value = parsed
-    }
-  } catch (e) {
-    // ignore JSON errors
-    console.warn('Failed to load column colors from storage', e)
+  // null = unset (use per-component default-color)
+  const colors = ref<(string | null)[]>([null, null, null, null])
+
+  // Defaults are registered by TaskColumn via its `defaultColor` prop.
+  // We don't hardcode defaults here.
+  const defaults = ref<(string | null)[]>([null, null, null, null])
+
+  const didHydrate = ref(false)
+
+  async function hydrateFromApi() {
+    if (!authStore.isAuthenticated) return
+    const setting = await getSetting().catch(() => null)
+    if (!setting) return
+
+    const fromApi = normalizeColorArray(setting.column_colors)
+    // If defaults are known, store only the overrides (so UI can fall back to props).
+    colors.value = fromApi.map((c, i) => {
+      const def = defaults.value[i]
+      if (def && c && c.toLowerCase() === def.toLowerCase()) return null
+      return c
+    })
   }
 
-  // persist changes
   watch(
-    colors,
-    (val) => {
-      try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(val))
-      } catch (e) {
-        console.warn('Failed to save column colors to storage', e)
-      }
+    () => authStore.isAuthenticated,
+    (authed) => {
+      if (!authed) return
+      if (didHydrate.value) return
+      didHydrate.value = true
+      void hydrateFromApi()
     },
-    { deep: true },
+    { immediate: true },
   )
 
-  function setColor(status: TaskStatus | string, color: string | null) {
-    if (color === null) {
-      delete colors.value[String(status)]
-    } else {
-      colors.value[String(status)] = color
+  function buildApiArray(): string[] | null {
+    const out: string[] = []
+    for (let i = 0; i < STATUS_ORDER.length; i++) {
+      const v = colors.value[i]
+      if (typeof v === 'string' && v.length > 0) {
+        out[i] = v
+        continue
+      }
+      const def = defaults.value[i]
+      if (typeof def === 'string' && def.length > 0) {
+        out[i] = def
+        continue
+      }
+      // Can't build a valid 4-item hex array without knowing this default.
+      return null
     }
+    return out
+  }
+
+  async function persistToApi() {
+    if (!authStore.isAuthenticated) return
+    const payload = buildApiArray()
+    if (!payload) {
+      console.warn('Column defaults not registered yet; skipping column_colors sync')
+      return
+    }
+    await updateSetting({ column_colors: payload })
+  }
+
+  function registerDefaultColor(status: TaskStatus, color: string) {
+    const idx = indexForStatus(status)
+    if (idx < 0) return
+    if (!color) return
+    defaults.value[idx] = color
+
+    // If the current override equals the default, drop it.
+    const current = colors.value[idx]
+    if (current && current.toLowerCase() === color.toLowerCase()) {
+      colors.value[idx] = null
+    }
+  }
+
+  function setColor(status: TaskStatus | string, color: string | null) {
+    const idx = indexForStatus(status)
+    if (idx < 0) return
+    colors.value[idx] = color && color.length > 0 ? color : null
+    void persistToApi().catch((e: unknown) => {
+      console.error('Failed to save column colors to setting endpoint:', e)
+    })
   }
 
   function getColor(status: TaskStatus | string) {
-    return computed(() => colors.value[String(status)] ?? '')
+    return computed(() => {
+      const idx = indexForStatus(status)
+      if (idx < 0) return ''
+      return colors.value[idx] ?? ''
+    })
   }
 
-  return { colors, setColor, getColor }
+  return { colors, defaults, registerDefaultColor, setColor, getColor, hydrateFromApi }
 })

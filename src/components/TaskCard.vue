@@ -3,6 +3,7 @@ import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import type { InputInstance } from 'element-plus'
 import type { Task } from '../types'
 import { useTasksStore } from '../stores/tasks'
+import { useFocusStore } from '../stores/focusSessions'
 import { Pencil, Trash2 } from 'lucide-vue-next'
 
 // Define Props Interface for cleaner syntax and environment compatibility
@@ -26,6 +27,7 @@ const emit = defineEmits<{
 }>()
 
 const tasksStore = useTasksStore()
+const focusStore = useFocusStore()
 
 const effectiveThemeColor = computed(() => props.task.theme_color || props.theme_color)
 const effectiveBgColor = computed(() => props.task.background_color || props.background_color)
@@ -49,6 +51,13 @@ const rootStyles = computed(() => ({
 const progressStyle = computed(() => ({
   width: `${Math.min(100, Math.max(0, props.task.progress))}%`,
 }))
+
+const focusedMinutes = computed(() => focusStore.totalMinutesForTask(props.task.id) || 0)
+const estimatedMinutes = computed(() => {
+  const n = Number(props.task.estimated_minutes)
+  if (!Number.isFinite(n) || n <= 0) return 0
+  return Math.round(n)
+})
 
 // --- Edit State ---
 const editing = ref(false)
@@ -347,7 +356,8 @@ async function saveEdit() {
         <div class="bar" :style="progressStyle"></div>
       </div>
       <div class="meta">
-        <span>{{ task.estimated_minutes ?? 0 }}m</span>
+        <span v-if="estimatedMinutes > 0">{{ focusedMinutes }}/{{ estimatedMinutes }}m</span>
+        <span v-else>{{ focusedMinutes }}m</span>
       </div>
     </div>
   </el-card>
