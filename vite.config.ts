@@ -16,7 +16,7 @@ export default defineConfig({
       includeAssets: ['favicon.ico', 'mascot.png', 'mascot.png'],
       manifest: {
         name: 'Life Management App',
-        short_name: 'LMA',
+        short_name: 'kanori',
         description: 'Life Management App',
         start_url: '/',
         scope: '/',

@@ -2,7 +2,7 @@
   "lockfileVersion": 1,
   "workspaces": {
     "": {
-      "name": "lma",
+      "name": "kanori",
       "dependencies": {
         "apexcharts": "^3.49.1",
         "element-plus": "^2.12.0",

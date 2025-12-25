@@ -11,7 +11,7 @@ const Register = () => import('../views/Register.vue')
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
-    { path: '/', name: 'dashboard', component: Dashboard },
+    { path: '/', name: 'home', component: Dashboard },
     { path: '/login', name: 'login', component: Login, meta: { public: true } },
     { path: '/register', name: 'register', component: Register, meta: { public: true } },
     { path: '/notes', name: 'notes', component: Notes },
